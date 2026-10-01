@@ -2,7 +2,7 @@
 FROM node:20-slim AS frontend-builder
 WORKDIR /app/frontend
 COPY frontend/package*.json ./
-RUN npm ci
+RUN npm install
 COPY frontend/ ./
 RUN npm run build
 
@@ -10,9 +10,13 @@ RUN npm run build
 FROM python:3.11-slim
 WORKDIR /app
 
-# Install system tools
+# Install system dependencies (espeak-ng & ffmpeg for TTS/audio processing, curl for health checks)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
+    espeak-ng \
+    libespeak1 \
+    ffmpeg \
+    curl \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Python dependencies

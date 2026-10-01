@@ -238,3 +238,36 @@ class CloudPipeline:
             raise RuntimeError("Online speech synthesis failed. Check network access or switch to Local mode.") from exc
         if audio_parts and not cancel_event.is_set():
             yield b"".join(audio_parts)
+
+    async def transcribe_audio(self, wav_bytes: bytes, prompt: str = "EchoFlow AI voice assistant") -> str:
+        """Transcribe PCM/WAV speech using ultra-fast Groq Whisper API (<150ms latency)."""
+        if not self.groq_api_key or not wav_bytes:
+            return ""
+        client = await self._get_client()
+        headers = {"Authorization": f"Bearer {self.groq_api_key}"}
+        files = {"file": ("audio.wav", wav_bytes, "audio/wav")}
+        data = {
+            "model": "whisper-large-v3-turbo",
+            "response_format": "json",
+            "temperature": "0.0",
+            "prompt": prompt,
+        }
+        try:
+            response = await client.post(
+                "https://api.groq.com/openai/v1/audio/transcriptions",
+                headers=headers,
+                files=files,
+                data=data,
+                timeout=12.0,
+            )
+            if response.status_code == 200:
+                result = response.json()
+                text = str(result.get("text", "")).strip()
+                logger.info("Groq Whisper transcribed: %r", text)
+                return text
+            else:
+                logger.warning("Groq Whisper API returned %s: %s", response.status_code, response.text)
+        except Exception as exc:
+            logger.warning("Server-side Whisper transcription failed: %s", exc)
+        return ""
+

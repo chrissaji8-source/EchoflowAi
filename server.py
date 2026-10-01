@@ -2,9 +2,11 @@
 
 import asyncio
 import base64
+import io
 import json
 import logging
 import secrets
+import wave
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, AsyncIterator, Dict, Optional
@@ -108,6 +110,16 @@ async def set_pipeline_mode(request: Request) -> JSONResponse:
     return JSONResponse(content={"status": "SUCCESS", "current_mode": default_pipeline_mode})
 
 
+def pcm_to_wav(pcm_chunks: list[bytes], sample_rate: int = 16000) -> bytes:
+    buf = io.BytesIO()
+    with wave.open(buf, "wb") as wf:
+        wf.setnchannels(1)
+        wf.setsampwidth(2)
+        wf.setframerate(sample_rate)
+        wf.writeframes(b"".join(pcm_chunks))
+    return buf.getvalue()
+
+
 @app.websocket("/ws/audio")
 async def websocket_audio_endpoint(websocket: WebSocket) -> None:
     await websocket.accept()
@@ -118,6 +130,10 @@ async def websocket_audio_endpoint(websocket: WebSocket) -> None:
     intent_classifier = IntentClassifier()
     state_manager = DialogueStateManager(session_id=session_id)
     send_lock = asyncio.Lock()
+
+    speech_audio_frames: list[bytes] = []
+    consecutive_silence_frames = 0
+    stt_task: Optional[asyncio.Task] = None
 
     generation_task: Optional[asyncio.Task] = None
     cancel_event: Optional[asyncio.Event] = None
@@ -360,6 +376,8 @@ async def websocket_audio_endpoint(websocket: WebSocket) -> None:
                     user_text = raw_user_text.strip()
                     if not user_text:
                         continue
+                    speech_audio_frames.clear()
+                    consecutive_silence_frames = 0
                     if state_manager.is_assistant_speaking:
                         classification = (
                             intent_classifier.classify_text(user_text)
@@ -430,20 +448,60 @@ async def websocket_audio_endpoint(websocket: WebSocket) -> None:
                     continue
                 was_active = vad.is_speech_active
                 is_speech, probability, latency_ms = vad.process_frame(pcm_bytes)
-                if is_speech and not was_active:
-                    await send_json({"type": "VAD_STATE", "active": True, "speech_prob": round(probability, 3)})
-                if is_speech and not was_active and state_manager.is_assistant_speaking:
-                    await send_json({
-                        "type": "ACOUSTIC_DUCK_TRIGGER",
-                        "speech_prob": round(probability, 3),
-                        "latency_ms": round(latency_ms, 3),
-                        "action": "DUCK_VOLUME",
-                        "duck_ratio": config.DUCKING_VOLUME_RATIO,
-                        "fade_ms": config.DUCKING_FADE_MS,
-                    })
-                elif was_active and not is_speech:
-                    await send_json({"type": "VAD_STATE", "active": False, "speech_prob": round(probability, 3)})
-                    await send_json({"type": "ACOUSTIC_DUCK_RELEASE", "fade_ms": config.DUCKING_FADE_MS})
+
+                if is_speech:
+                    speech_audio_frames.append(pcm_bytes)
+                    consecutive_silence_frames = 0
+                    if not was_active:
+                        await send_json({"type": "VAD_STATE", "active": True, "speech_prob": round(probability, 3)})
+                    if not was_active and state_manager.is_assistant_speaking:
+                        await send_json({
+                            "type": "ACOUSTIC_DUCK_TRIGGER",
+                            "speech_prob": round(probability, 3),
+                            "latency_ms": round(latency_ms, 3),
+                            "action": "DUCK_VOLUME",
+                            "duck_ratio": config.DUCKING_VOLUME_RATIO,
+                            "fade_ms": config.DUCKING_FADE_MS,
+                        })
+                else:
+                    if speech_audio_frames:
+                        consecutive_silence_frames += 1
+                        if consecutive_silence_frames <= 10:
+                            speech_audio_frames.append(pcm_bytes)
+
+                        # Once silence lasts ~14 frames (~420ms) after speech of at least ~360ms:
+                        if consecutive_silence_frames >= 14 and len(speech_audio_frames) >= 12:
+                            frames_to_process = speech_audio_frames[:]
+                            speech_audio_frames.clear()
+                            consecutive_silence_frames = 0
+
+                            async def process_server_stt(frames: list[bytes]) -> None:
+                                wav_bytes = pcm_to_wav(frames, config.SAMPLE_RATE)
+                                transcribed_text = await cloud_pipeline.transcribe_audio(wav_bytes)
+                                if transcribed_text and transcribed_text.strip():
+                                    cleaned = transcribed_text.strip()
+                                    if state_manager.is_assistant_speaking:
+                                        classification = intent_classifier.classify_text(cleaned)
+                                        if classification["intent"] == IntentType.BACKCHANNEL:
+                                            await send_json({
+                                                "type": "BACKCHANNEL_IGNORED",
+                                                "matched_text": classification["matched_text"],
+                                                "action": "RESTORE_VOLUME",
+                                            })
+                                            return
+                                        await interrupt_and_respond(
+                                            cleaned,
+                                            classification["matched_text"],
+                                            classification["latency_ms"],
+                                        )
+                                    else:
+                                        await start_user_turn(cleaned)
+
+                            stt_task = asyncio.create_task(process_server_stt(frames_to_process))
+
+                    if was_active and not is_speech:
+                        await send_json({"type": "VAD_STATE", "active": False, "speech_prob": round(probability, 3)})
+                        await send_json({"type": "ACOUSTIC_DUCK_RELEASE", "fade_ms": config.DUCKING_FADE_MS})
 
     except WebSocketDisconnect:
         pass

@@ -14,8 +14,10 @@ def _bool_env(name: str, default: bool) -> bool:
 
 
 class Config:
-    # Bind to 0.0.0.0 by default to accept traffic across containers and platforms.
-    HOST = os.getenv("HOST", "0.0.0.0")
+    # Bind to 0.0.0.0 for all containers/cloud hosts (Render, Railway, Cloud Run, etc.)
+    _is_cloud = any(k in os.environ for k in ("RENDER", "RAILWAY_ENVIRONMENT", "FLY_APP_NAME", "K_SERVICE"))
+    _raw_host = os.getenv("HOST", "").strip()
+    HOST = "0.0.0.0" if (_is_cloud or not _raw_host or _raw_host in {"127.0.0.1", "localhost"}) else _raw_host
     PORT = int(os.getenv("PORT", "8000"))
     DEBUG = _bool_env("DEBUG", False)
 

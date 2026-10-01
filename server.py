@@ -518,5 +518,7 @@ else:
 if __name__ == "__main__":
     import uvicorn
 
-    logger.info("Starting EchoFlow on http://%s:%s", config.HOST, config.PORT)
-    uvicorn.run("server:app", host=config.HOST, port=config.PORT, reload=config.DEBUG)
+    host = os.getenv("HOST", "0.0.0.0")
+    port = int(os.getenv("PORT", str(config.PORT)))
+    logger.info("Starting EchoFlow on http://%s:%s", host, port)
+    uvicorn.run("server:app", host=host, port=port, reload=config.DEBUG)

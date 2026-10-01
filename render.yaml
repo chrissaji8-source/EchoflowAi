@@ -1,0 +1,18 @@
+services:
+  - type: web
+    name: echoflow-ai
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: free
+    healthCheckPath: /health
+    envVars:
+      - key: PIPELINE_MODE
+        value: cloud
+      - key: HOST
+        value: 0.0.0.0
+      - key: GROQ_API_KEY
+        sync: false
+      - key: GROQ_MODEL
+        value: openai/gpt-oss-20b
+      - key: GEMINI_API_KEY
+        sync: false

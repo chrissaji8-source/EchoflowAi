@@ -68,7 +68,13 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
 app = FastAPI(title="EchoFlow Voice Turn-Taking Demo", version="2.0.0", lifespan=lifespan)
 
 
-@app.get("/api/status")
+@app.api_route("/health", methods=["GET", "HEAD"])
+@app.api_route("/healthz", methods=["GET", "HEAD"])
+async def health_check() -> Dict[str, str]:
+    return {"status": "ok"}
+
+
+@app.api_route("/api/status", methods=["GET", "HEAD"])
 async def get_status() -> Dict[str, Any]:
     ollama_available = await local_pipeline.is_ollama_available()
     provider = "groq" if config.GROQ_API_KEY else "gemini" if config.GEMINI_API_KEY else None
@@ -104,11 +110,6 @@ async def set_pipeline_mode(request: Request) -> JSONResponse:
 
 @app.websocket("/ws/audio")
 async def websocket_audio_endpoint(websocket: WebSocket) -> None:
-    origin = websocket.headers.get("origin")
-    request_host = websocket.headers.get("host", "").lower()
-    if origin and urlsplit(origin).netloc.lower() != request_host:
-        await websocket.close(code=1008)
-        return
     await websocket.accept()
 
     session_id = secrets.token_urlsafe(12)
@@ -461,7 +462,7 @@ async def websocket_audio_endpoint(websocket: WebSocket) -> None:
 
 CADENCE_DIST = BASE_DIR / "frontend" / "dist"
 
-@app.get("/favicon.ico")
+@app.api_route("/favicon.ico", methods=["GET", "HEAD"])
 async def favicon() -> Response:
     fav = CADENCE_DIST / "favicon.ico"
     if fav.exists():
@@ -469,17 +470,17 @@ async def favicon() -> Response:
     return Response(content=b"", media_type="image/x-icon")
 
 
-@app.get("/style.css")
+@app.api_route("/style.css", methods=["GET", "HEAD"])
 async def legacy_hud_stylesheet() -> FileResponse:
     return FileResponse(str(STATIC_DIR / "style.css"), media_type="text/css")
 
 
-@app.get("/app.js")
+@app.api_route("/app.js", methods=["GET", "HEAD"])
 async def legacy_hud_script() -> FileResponse:
     return FileResponse(str(STATIC_DIR / "app.js"), media_type="text/javascript")
 
 
-@app.get("/audio-worklet.js")
+@app.api_route("/audio-worklet.js", methods=["GET", "HEAD"])
 async def audio_worklet() -> FileResponse:
     built_worklet = CADENCE_DIST / "audio-worklet.js"
     worklet = built_worklet if built_worklet.is_file() else STATIC_DIR / "audio-worklet.js"
@@ -493,13 +494,13 @@ if (CADENCE_DIST / "media").exists():
 
 # Serve HUD Dashboard on /hud
 if (STATIC_DIR / "index.html").exists():
-    @app.get("/hud", response_class=HTMLResponse)
+    @app.api_route("/hud", methods=["GET", "HEAD"], response_class=HTMLResponse)
     async def serve_hud():
         return FileResponse(str(STATIC_DIR / "index.html"))
 
 # SPA Catch-all route for Cadence
 if (CADENCE_DIST / "index.html").exists():
-    @app.get("/{full_path:path}", response_class=HTMLResponse)
+    @app.api_route("/{full_path:path}", methods=["GET", "HEAD"], response_class=HTMLResponse)
     async def serve_spa(full_path: str):
         dist_root = CADENCE_DIST.resolve()
         file_target = (dist_root / full_path).resolve()

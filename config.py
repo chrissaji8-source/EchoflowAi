@@ -14,8 +14,8 @@ def _bool_env(name: str, default: bool) -> bool:
 
 
 class Config:
-    # Bind to loopback by default. Set HOST explicitly to expose the demo on a network.
-    HOST = os.getenv("HOST", "127.0.0.1")
+    # Bind to 0.0.0.0 by default to accept traffic across containers and platforms.
+    HOST = os.getenv("HOST", "0.0.0.0")
     PORT = int(os.getenv("PORT", "8000"))
     DEBUG = _bool_env("DEBUG", False)
 

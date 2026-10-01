@@ -258,8 +258,14 @@ export function EchoFlowVoiceProvider({ children }: { children: ReactNode }) {
       for (let index = event.resultIndex; index < event.results.length; index += 1) {
         const result = event.results[index]
         if (!result.isFinal) continue
-        const text = String(result[0]?.transcript ?? '').trim()
-        if (text) sendControl({ type: 'USER_TRANSCRIPT_FINAL', text })
+        let text = String(result[0]?.transcript ?? '').trim()
+        if (text) {
+          // Phonetic normalization for common browser STT distortions
+          text = text
+            .replace(/\b(for low air|flow air|slow ar|slow air|echo floor|echo blow|a flow ai|eco flow)\b/gi, 'EchoFlow AI')
+            .replace(/\b(echo flow)\b/gi, 'EchoFlow')
+          sendControl({ type: 'USER_TRANSCRIPT_FINAL', text })
+        }
       }
     }
     recognition.onerror = (event: any) => {

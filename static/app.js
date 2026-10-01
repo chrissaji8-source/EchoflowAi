@@ -305,8 +305,13 @@ function startSpeechRecognition() {
         for (let index = event.resultIndex; index < event.results.length; index += 1) {
             const result = event.results[index];
             if (!result.isFinal) continue;
-            const transcript = result[0]?.transcript?.trim();
-            if (transcript) sendJson({ type: "USER_TRANSCRIPT_FINAL", text: transcript });
+            let transcript = result[0]?.transcript?.trim();
+            if (transcript) {
+                transcript = transcript
+                    .replace(/\b(for low air|flow air|slow ar|slow air|echo floor|echo blow|a flow ai|eco flow)\b/gi, 'EchoFlow AI')
+                    .replace(/\b(echo flow)\b/gi, 'EchoFlow');
+                sendJson({ type: "USER_TRANSCRIPT_FINAL", text: transcript });
+            }
         }
     };
     recognition.onerror = (event) => {

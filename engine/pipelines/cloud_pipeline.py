@@ -263,16 +263,26 @@ class CloudPipeline:
             if response.status_code == 200:
                 result = response.json()
                 text = str(result.get("text", "")).strip()
-                # Filter out well-known Whisper hallucinations on background noise/silence
-                cleaned_lower = text.lower().strip().rstrip(".!?,")
-                hallucinations = {
-                    "thank you", "thanks for watching", "thank you for watching",
+                # Filter out all Whisper hallucinations on background noise/silence
+                t = text.lower().strip().rstrip(".!?,")
+                
+                # Check for bracketed audio subtitle artifacts (e.g. [Music], (applause))
+                if (t.startswith("[") and t.endswith("]")) or (t.startswith("(") and t.endswith(")")):
+                    logger.debug("Filtered Whisper subtitle tag: %r", text)
+                    return ""
+                
+                # Phrases that Whisper generates from ambient room hiss / silence
+                silence_phrases = {
+                    "thank you", "thanks", "thank you for watching", "thanks for watching",
                     "thank you very much", "thank you so much", "bye", "goodbye",
                     "you", "subscribe", "like and subscribe", "subtitles", "silence",
-                    "thanks", "mbc 뉴스", "시청해 주셔서 감사합니다",
+                    "mbc 뉴스", "시청해 주셔서 감사합니다", "subtitles by", "translated by",
+                    "the end", "peace", "y'all", "uh", "um", "oh", "ah", "okay",
                 }
-                if cleaned_lower in hallucinations or len(cleaned_lower) <= 1:
+                if t in silence_phrases or any(t.startswith(p) and len(t.split()) <= 3 for p in ["thank you", "thanks for", "bye"]):
                     logger.debug("Filtered Whisper silence hallucination: %r", text)
+                    return ""
+                if len(t) <= 1:
                     return ""
                 logger.info("Groq Whisper transcribed: %r", text)
                 return text

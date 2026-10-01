@@ -263,6 +263,17 @@ class CloudPipeline:
             if response.status_code == 200:
                 result = response.json()
                 text = str(result.get("text", "")).strip()
+                # Filter out well-known Whisper hallucinations on background noise/silence
+                cleaned_lower = text.lower().strip().rstrip(".!?,")
+                hallucinations = {
+                    "thank you", "thanks for watching", "thank you for watching",
+                    "thank you very much", "thank you so much", "bye", "goodbye",
+                    "you", "subscribe", "like and subscribe", "subtitles", "silence",
+                    "thanks", "mbc 뉴스", "시청해 주셔서 감사합니다",
+                }
+                if cleaned_lower in hallucinations or len(cleaned_lower) <= 1:
+                    logger.debug("Filtered Whisper silence hallucination: %r", text)
+                    return ""
                 logger.info("Groq Whisper transcribed: %r", text)
                 return text
             else:

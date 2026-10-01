@@ -133,6 +133,7 @@ async def websocket_audio_endpoint(websocket: WebSocket) -> None:
 
     speech_audio_frames: list[bytes] = []
     consecutive_silence_frames = 0
+    voiced_speech_frames_count = 0
     stt_task: Optional[asyncio.Task] = None
 
     generation_task: Optional[asyncio.Task] = None
@@ -450,6 +451,7 @@ async def websocket_audio_endpoint(websocket: WebSocket) -> None:
                 is_speech, probability, latency_ms = vad.process_frame(pcm_bytes)
 
                 if is_speech:
+                    voiced_speech_frames_count += 1
                     speech_audio_frames.append(pcm_bytes)
                     consecutive_silence_frames = 0
                     if not was_active:
@@ -469,35 +471,39 @@ async def websocket_audio_endpoint(websocket: WebSocket) -> None:
                         if consecutive_silence_frames <= 10:
                             speech_audio_frames.append(pcm_bytes)
 
-                        # Once silence lasts ~14 frames (~420ms) after speech of at least ~360ms:
-                        if consecutive_silence_frames >= 14 and len(speech_audio_frames) >= 12:
+                        # Once silence lasts ~14 frames (~420ms) after genuine voiced speech:
+                        if consecutive_silence_frames >= 14:
                             frames_to_process = speech_audio_frames[:]
+                            voiced_count = voiced_speech_frames_count
                             speech_audio_frames.clear()
                             consecutive_silence_frames = 0
+                            voiced_speech_frames_count = 0
 
-                            async def process_server_stt(frames: list[bytes]) -> None:
-                                wav_bytes = pcm_to_wav(frames, config.SAMPLE_RATE)
-                                transcribed_text = await cloud_pipeline.transcribe_audio(wav_bytes)
-                                if transcribed_text and transcribed_text.strip():
-                                    cleaned = transcribed_text.strip()
-                                    if state_manager.is_assistant_speaking:
-                                        classification = intent_classifier.classify_text(cleaned)
-                                        if classification["intent"] == IntentType.BACKCHANNEL:
-                                            await send_json({
-                                                "type": "BACKCHANNEL_IGNORED",
-                                                "matched_text": classification["matched_text"],
-                                                "action": "RESTORE_VOLUME",
-                                            })
-                                            return
-                                        await interrupt_and_respond(
-                                            cleaned,
-                                            classification["matched_text"],
-                                            classification["latency_ms"],
-                                        )
-                                    else:
-                                        await start_user_turn(cleaned)
+                            # Ignore if utterance had fewer than 8 voiced frames (less than ~240ms of real voice)
+                            if voiced_count >= 8:
+                                async def process_server_stt(frames: list[bytes]) -> None:
+                                    wav_bytes = pcm_to_wav(frames, config.SAMPLE_RATE)
+                                    transcribed_text = await cloud_pipeline.transcribe_audio(wav_bytes)
+                                    if transcribed_text and transcribed_text.strip():
+                                        cleaned = transcribed_text.strip()
+                                        if state_manager.is_assistant_speaking:
+                                            classification = intent_classifier.classify_text(cleaned)
+                                            if classification["intent"] == IntentType.BACKCHANNEL:
+                                                await send_json({
+                                                    "type": "BACKCHANNEL_IGNORED",
+                                                    "matched_text": classification["matched_text"],
+                                                    "action": "RESTORE_VOLUME",
+                                                })
+                                                return
+                                            await interrupt_and_respond(
+                                                cleaned,
+                                                classification["matched_text"],
+                                                classification["latency_ms"],
+                                            )
+                                        else:
+                                            await start_user_turn(cleaned)
 
-                            stt_task = asyncio.create_task(process_server_stt(frames_to_process))
+                                stt_task = asyncio.create_task(process_server_stt(frames_to_process))
 
                     if was_active and not is_speech:
                         await send_json({"type": "VAD_STATE", "active": False, "speech_prob": round(probability, 3)})

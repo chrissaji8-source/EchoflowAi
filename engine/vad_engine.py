@@ -64,6 +64,10 @@ class VADEngine:
         speech_prob = float(0.5 * voice_ratio + 0.35 * snr_factor + 0.15 * zcr_penalty)
         speech_prob = np.clip(speech_prob, 0.0, 1.0)
         
+        # Absolute minimal RMS floor for voiced speech (rejects low-level room hiss / background fan)
+        if rms < 0.008:
+            speech_prob = 0.0
+
         is_speech = speech_prob >= self.threshold
         
         # Debounce state transitions (prevent jitter)

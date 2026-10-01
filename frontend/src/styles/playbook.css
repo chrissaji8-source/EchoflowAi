@@ -1,0 +1,426 @@
+/* ==========================================================================
+   Playbook: five habits beside a phone that follows them
+   ========================================================================== */
+
+:root {
+  --habit-phone: clamp(200px, calc((100svh - 300px) / 2.16), 310px);
+}
+
+.habits {
+  padding: clamp(60px, 8vw, 110px) 0 clamp(30px, 4vw, 60px);
+}
+.habits-grid {
+  display: grid;
+  grid-template-columns: minmax(280px, 0.8fr) minmax(0, 1.2fr);
+  align-items: start;
+  gap: clamp(32px, 6vw, 110px);
+}
+.habits-stage {
+  position: sticky;
+  top: calc(var(--bar-h) + 24px);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 22px;
+  height: calc(100svh - var(--bar-h) - var(--hud-h) - 48px);
+}
+.habits-ticks {
+  display: flex;
+  width: 100%;
+  max-width: 380px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.habits-ticks li {
+  flex: 1;
+  padding-top: 10px;
+  border-top: 1px solid var(--line-strong);
+  color: var(--fg-dim);
+  transition: color 0.3s, border-color 0.3s;
+}
+.habits-ticks li span {
+  display: block;
+  font-family: var(--f-display);
+  font-size: 16px;
+  font-style: italic;
+}
+.habits-name {
+  margin: -8px 0 0;
+  width: 100%;
+  max-width: 380px;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+}
+.habits-ticks li.is-on,
+.habits-ticks li.is-past {
+  color: var(--fg);
+  border-top-color: var(--fg);
+}
+.habits-ticks li.is-on {
+  margin-top: -2px;
+  border-top-width: 3px;
+}
+.habit-screen {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  transition: opacity 0.55s var(--ease);
+}
+.habit-screen.is-on {
+  opacity: 1;
+}
+.habits-list {
+  display: grid;
+  gap: clamp(90px, 12vw, 180px);
+  padding: clamp(10px, 4vw, 50px) 0 clamp(40px, 6vw, 80px);
+}
+.habit {
+  min-height: 62svh;
+  scroll-margin-top: 100px;
+}
+.habit .slate {
+  max-width: 30rem;
+  margin-bottom: 28px;
+}
+.habit-title {
+  margin: 0 0 24px;
+  font-size: clamp(2.4rem, 4.6vw, 4.4rem);
+  line-height: 1;
+}
+.habit .lead {
+  max-width: 30em;
+}
+.habit-inline {
+  display: none;
+}
+@media (max-width: 960px) {
+  .habits-grid {
+    grid-template-columns: 1fr;
+  }
+  .habits-stage {
+    display: none;
+  }
+  .habit-inline {
+    display: flex;
+    justify-content: center;
+    margin: 36px 0;
+  }
+  .habit {
+    min-height: 0;
+  }
+}
+
+.tips {
+  display: grid;
+  margin: 34px 0 0;
+  padding: 0;
+  list-style: none;
+  border-top: 1px solid var(--line-strong);
+  counter-reset: tip;
+}
+.tips li {
+  display: grid;
+  grid-template-columns: 2.6rem 1fr;
+  gap: 12px;
+  padding: 15px 0;
+  border-bottom: 1px solid var(--line);
+  counter-increment: tip;
+}
+.tips li::before {
+  content: counter(tip, upper-roman);
+  color: var(--fg-dim);
+  font-family: var(--f-display);
+  font-style: italic;
+  line-height: 1.5;
+}
+
+/* safe-word generator */
+.sw {
+  margin-top: 34px;
+  padding: clamp(20px, 2.4vw, 30px);
+  border: 1px solid var(--line-strong);
+}
+.sw label {
+  display: block;
+  margin-bottom: 8px;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+}
+.sw input {
+  width: 100%;
+  height: 50px;
+  padding: 0 14px;
+  border: 1px solid var(--fg);
+  border-radius: 0;
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+}
+.sw input::placeholder {
+  color: var(--fg-dim);
+}
+.sw-phrase {
+  margin: 24px 0;
+  font-family: var(--f-display);
+  font-size: clamp(1.8rem, 3vw, 2.7rem);
+  font-style: italic;
+  line-height: 1.05;
+  letter-spacing: -0.01em;
+}
+.sw-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.sw-note {
+  margin: 18px 0 0;
+  color: var(--fg-dim);
+  font-size: 13px;
+}
+
+/* the call-back script as a teleprompter */
+.teleprompter {
+  margin: 40px 0 0;
+  padding: 36px clamp(22px, 3vw, 44px) 42px;
+  background: var(--ink);
+  color: var(--paper);
+}
+.teleprompter-label {
+  margin: 0 0 20px;
+  color: #a6a6a6;
+  font-family: var(--f-script);
+  font-size: 12px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+.teleprompter-text {
+  font-family: var(--f-display);
+  font-size: clamp(1.7rem, 2.8vw, 2.6rem);
+  line-height: 1.12;
+  letter-spacing: -0.015em;
+}
+
+/* good and weak questions */
+.qa {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  margin-top: 34px;
+  border: 1px solid var(--line-strong);
+}
+.qa-col {
+  padding: 26px 26px 10px;
+}
+.qa-col + .qa-col {
+  border-left: 1px solid var(--line-strong);
+}
+.qa-col p {
+  margin: 0 0 14px;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+}
+.qa-col ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.qa-col li {
+  padding: 14px 0;
+  border-top: 1px solid var(--line);
+  font-family: var(--f-display);
+  font-size: 1.25rem;
+  font-style: italic;
+  line-height: 1.2;
+}
+.qa-col--weak li {
+  color: var(--fg-dim);
+  text-decoration: line-through;
+  text-decoration-thickness: 1px;
+}
+@media (max-width: 700px) {
+  .qa {
+    grid-template-columns: 1fr;
+  }
+  .qa-col + .qa-col {
+    border-top: 1px solid var(--line-strong);
+    border-left: 0;
+  }
+}
+
+/* payment rules */
+.rules {
+  margin: 34px 0 0;
+  border-top: 1px solid var(--line-strong);
+}
+.rules div {
+  display: grid;
+  grid-template-columns: minmax(8rem, 0.36fr) 1fr;
+  align-items: baseline;
+  gap: 20px;
+  padding: 18px 0;
+  border-bottom: 1px solid var(--line);
+}
+.rules dt {
+  font-family: var(--f-display);
+  font-size: 1.5rem;
+  font-style: italic;
+  line-height: 1.1;
+}
+.rules dd {
+  margin: 0;
+  font-size: 1.05rem;
+}
+@media (max-width: 560px) {
+  .rules div {
+    grid-template-columns: 1fr;
+    gap: 4px;
+  }
+}
+
+.pull {
+  margin: 34px 0 0;
+  padding-top: 26px;
+  border-top: 3px solid var(--fg);
+  font-family: var(--f-display);
+  font-size: clamp(1.7rem, 2.8vw, 2.6rem);
+  font-style: italic;
+  line-height: 1.12;
+}
+
+/* ==========================================================================
+   Playbook: readiness, frames exposed one by one
+   ========================================================================== */
+
+.ready {
+  padding: clamp(90px, 12vw, 160px) 0;
+}
+.ready-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+  align-items: start;
+  gap: clamp(32px, 6vw, 100px);
+}
+.ready-side .section-title {
+  margin: 0 0 38px;
+  font-size: clamp(2.2rem, 4.4vw, 4rem);
+}
+.exposure {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 8px;
+  padding: 34px 10px;
+  border-block: 1px solid var(--line-strong);
+}
+.exposure::before,
+.exposure::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 8px;
+  background: repeating-linear-gradient(90deg, transparent 0 6px, var(--line-strong) 6px 14px, transparent 14px 20px);
+}
+.exposure::before {
+  top: 10px;
+}
+.exposure::after {
+  bottom: 10px;
+}
+.exposure span {
+  display: grid;
+  aspect-ratio: 3 / 4;
+  align-items: end;
+  padding: 8px;
+  border: 1px solid var(--line-strong);
+  color: var(--fg-dim);
+  font-family: var(--f-script);
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  transition: background-color 0.5s var(--ease), color 0.5s var(--ease);
+}
+.exposure span.is-lit {
+  background: var(--fg);
+  color: var(--bg);
+  animation: expose 0.8s var(--ease);
+}
+@keyframes expose {
+  from {
+    background: #fff;
+    transform: scale(1.08);
+  }
+}
+.ready-count {
+  margin: 24px 0 0;
+  font-family: var(--f-display);
+  font-size: 1.5rem;
+}
+.ready-count strong {
+  font-size: 3.2rem;
+  font-weight: 500;
+  line-height: 1;
+}
+.ready-note {
+  margin: 10px 0 0;
+  color: var(--fg-dim);
+  font-size: 13px;
+}
+.ready-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border-top: 1px solid var(--line-strong);
+}
+.check {
+  position: relative;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  gap: 18px;
+  padding: 22px 0;
+  border-bottom: 1px solid var(--line);
+  cursor: pointer;
+}
+.check input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+.check-box {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border: 1px solid var(--fg);
+  color: transparent;
+  transition: background-color 0.3s, color 0.3s;
+}
+.check.is-done .check-box {
+  background: var(--fg);
+  color: var(--bg);
+}
+.check input:focus-visible + .check-box {
+  outline: 2px solid var(--focus);
+  outline-offset: 3px;
+}
+.check-text {
+  font-size: 1.1rem;
+  line-height: 1.35;
+  transition: color 0.3s;
+}
+.check.is-done .check-text {
+  color: var(--fg-dim);
+  text-decoration: line-through;
+}
+@media (max-width: 900px) {
+  .ready-grid {
+    grid-template-columns: 1fr;
+  }
+}

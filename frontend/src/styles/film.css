@@ -1,0 +1,229 @@
+/* The demo film: a 1920x1080 stage driven entirely by time. */
+
+html.film-mode,
+html.film-mode body {
+  overflow: hidden;
+  background: #000;
+}
+html.film-mode body::after {
+  display: none;
+}
+html.film-mode .fm *,
+html.film-mode .fm *::before,
+html.film-mode .fm *::after {
+  transition: none !important;
+}
+.fm-viewport {
+  position: fixed;
+  inset: 0;
+  background: #000;
+}
+.fm-scale {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 1920px;
+  height: 1080px;
+  transform-origin: 0 0;
+}
+.fm {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  background: #000;
+  color: #f2f2f2;
+  font-family: var(--f-body);
+}
+.fm-black {
+  position: absolute;
+  inset: 0;
+  background: #000;
+  pointer-events: none;
+}
+.fm-layer {
+  position: absolute;
+  inset: 0;
+}
+
+/* cards */
+.fm-card {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+}
+.fm-title h1 {
+  margin: 0;
+  padding-left: 0.4em;
+  font-family: var(--f-display);
+  font-size: 200px;
+  font-weight: 600;
+  line-height: 1;
+  text-transform: uppercase;
+}
+.fm-title p {
+  margin: 34px 0 0;
+  font-family: var(--f-display);
+  font-size: 46px;
+  font-style: italic;
+  color: #b8b8b8;
+}
+.fm-title::before,
+.fm-title::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  width: 360px;
+  height: 1px;
+  margin-left: -180px;
+  background: rgba(242, 242, 242, 0.5);
+}
+.fm-title::before {
+  top: 300px;
+}
+.fm-title::after {
+  bottom: 300px;
+}
+.fm-inter-frame {
+  position: absolute;
+  inset: 110px 150px;
+  border: 1px solid rgba(242, 242, 242, 0.6);
+  outline: 1px solid rgba(242, 242, 242, 0.35);
+  outline-offset: 14px;
+}
+.fm-inter p {
+  max-width: 1320px;
+  margin: 0;
+  font-family: var(--f-display);
+  font-size: 104px;
+  font-style: italic;
+  font-weight: 400;
+  line-height: 1.08;
+  letter-spacing: -0.02em;
+}
+.fm-inter small {
+  margin-top: 46px;
+  color: #a6a6a6;
+  font-size: 22px;
+  letter-spacing: 0.26em;
+  text-transform: uppercase;
+}
+.fm-end p {
+  max-width: 1300px;
+  margin: 0;
+  font-family: var(--f-display);
+  font-size: 118px;
+  font-weight: 500;
+  line-height: 1.02;
+  letter-spacing: -0.03em;
+}
+.fm-end em {
+  font-weight: 400;
+}
+.fm-end-mark {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  margin-top: 70px;
+  font-family: var(--f-display);
+  font-size: 26px;
+  font-weight: 600;
+  letter-spacing: 0.4em;
+  text-transform: uppercase;
+}
+
+/* left column */
+.fm-slug {
+  position: absolute;
+  left: 150px;
+  top: 150px;
+  display: flex;
+  justify-content: space-between;
+  gap: 60px;
+  width: 820px;
+  padding-top: 18px;
+  white-space: nowrap;
+  border-top: 1px solid rgba(242, 242, 242, 0.6);
+  color: #a6a6a6;
+  font-size: 20px;
+  letter-spacing: 0.26em;
+  text-transform: uppercase;
+}
+.fm-slug span:last-child {
+  color: #f2f2f2;
+}
+.fm-caps {
+  position: absolute;
+  left: 150px;
+  bottom: 160px;
+  width: 900px;
+  height: 440px;
+}
+.fm-cap {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  margin: 0;
+  font-family: var(--f-display);
+  font-size: 112px;
+  font-weight: 500;
+  line-height: 1;
+  letter-spacing: -0.03em;
+}
+
+.fm-cap--long {
+  font-size: 88px;
+  line-height: 1.04;
+}
+
+/* phone + viewfinder marks */
+.fm-phone {
+  position: absolute;
+  right: 230px;
+  top: 50px;
+  width: 455px;
+  height: 980px;
+}
+.fm-marks i {
+  position: absolute;
+  width: 54px;
+  height: 54px;
+  border: 0 solid rgba(242, 242, 242, 0.75);
+}
+.fm-marks i:nth-child(1) {
+  left: -70px;
+  top: -24px;
+  border-width: 2px 0 0 2px;
+}
+.fm-marks i:nth-child(2) {
+  right: -70px;
+  top: -24px;
+  border-width: 2px 2px 0 0;
+}
+.fm-marks i:nth-child(3) {
+  left: -70px;
+  bottom: -24px;
+  border-width: 0 0 2px 2px;
+}
+.fm-marks i:nth-child(4) {
+  right: -70px;
+  bottom: -24px;
+  border-width: 0 2px 2px 0;
+}
+
+/* Deterministic level bars (no real-time CSS animation in frame renders). */
+.fm .bars i {
+  animation: none;
+  transform: scaleY(calc(0.3 + 0.7 * sin(var(--bt) * 9 + var(--i) * 1.9) * sin(var(--bt) * 9 + var(--i) * 1.9)));
+}
+.fm .as-lane i {
+  animation: none;
+}
+.fm .as-tracks--speaking .as-lane--ai i,
+.fm .as-tracks--listening .as-lane--you i {
+  animation: none;
+  transform: scaleY(calc(0.12 + var(--e) * 0.88 * sin(var(--bt) * 8 + var(--i) * 0.9) * sin(var(--bt) * 8 + var(--i) * 0.9)));
+}

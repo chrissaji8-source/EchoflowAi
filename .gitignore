@@ -1,0 +1,32 @@
+# Environment & Secrets
+.env
+.env*.local
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.log
+temp_*.wav
+.venv/
+venv/
+ENV/
+
+# Frontend / Node
+frontend/node_modules/
+frontend/dist/
+frontend/dist-ssr/
+frontend/*.tsbuildinfo
+node_modules/
+dist/
+*.tsbuildinfo
+
+# Launch artifacts / temporary outputs
+brag-output/
+brag-output-*/
+
+# IDE & OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

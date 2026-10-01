@@ -1,0 +1,357 @@
+/* ==========================================================================
+   Help: questions
+   ========================================================================== */
+
+.faq {
+  padding: clamp(90px, 12vw, 160px) 0;
+}
+.faq-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 0.85fr) minmax(0, 1.15fr);
+  align-items: start;
+  gap: clamp(32px, 6vw, 100px);
+}
+.faq-head {
+  position: sticky;
+  top: calc(var(--bar-h) + 50px);
+}
+.faq-head .section-head {
+  margin-bottom: 38px;
+}
+.faq-search label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 6px;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+}
+.faq-search input {
+  width: 100%;
+  height: 58px;
+  padding: 0 2px;
+  border: 0;
+  border-bottom: 2px solid var(--fg);
+  border-radius: 0;
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  font-size: 1.2rem;
+}
+.faq-search input::placeholder {
+  color: var(--fg-dim);
+}
+.faq-count {
+  min-height: 1.6em;
+  margin: 10px 0 0;
+  color: var(--fg-dim);
+  font-size: 13px;
+}
+.faq-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  margin-bottom: 4px;
+  border-bottom: 1px solid var(--line-strong);
+}
+.faq-tab {
+  position: relative;
+  margin-right: 24px;
+  padding: 14px 0;
+  border: 0;
+  background: none;
+  color: var(--fg-dim);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  transition: color 0.3s;
+}
+.faq-tab::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 3px;
+  background: var(--fg);
+  transform: scaleX(0);
+  transform-origin: 0 50%;
+  transition: transform 0.45s var(--ease);
+}
+.faq-tab:hover {
+  color: var(--fg);
+}
+.faq-tab[data-state='active'] {
+  color: var(--fg);
+}
+.faq-tab[data-state='active']::after {
+  transform: scaleX(1);
+}
+.faq-panel {
+  min-height: 380px;
+}
+.qa-item {
+  border-bottom: 1px solid var(--line);
+}
+.qa-item summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 24px 0;
+  font-family: var(--f-display);
+  font-size: clamp(1.3rem, 2vw, 1.75rem);
+  line-height: 1.15;
+  letter-spacing: -0.015em;
+  list-style: none;
+  cursor: pointer;
+}
+.qa-item summary::-webkit-details-marker {
+  display: none;
+}
+.qa-item summary svg {
+  flex: none;
+  transition: transform 0.45s var(--ease);
+}
+.qa-item[open] summary svg {
+  transform: rotate(180deg);
+}
+.qa-body {
+  max-width: 40em;
+  padding: 0 3rem 26px 0;
+}
+.qa-body p {
+  margin: 0;
+  color: var(--fg-dim);
+}
+.qa-item[open] .qa-body {
+  animation: swap-in 0.45s var(--ease);
+}
+.faq-hit {
+  padding-top: 20px;
+}
+.faq-topic {
+  color: var(--fg-dim);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+}
+.faq-empty {
+  margin: 20px 0;
+  font-family: var(--f-display);
+  font-size: 1.6rem;
+  line-height: 1.2;
+}
+.faq-empty a {
+  text-decoration: underline;
+  text-underline-offset: 5px;
+}
+@media (max-width: 900px) {
+  .faq-grid {
+    grid-template-columns: 1fr;
+  }
+  .faq-head {
+    position: static;
+  }
+  .faq-panel {
+    min-height: 0;
+  }
+}
+
+/* ==========================================================================
+   Help: if it happened
+   ========================================================================== */
+
+.stepscene-lede {
+  max-width: 28em;
+  margin: 18px 0 0;
+  color: var(--fg-dim);
+}
+@media (max-width: 900px) {
+  .stepscene-lede {
+    display: none;
+  }
+}
+
+/* ==========================================================================
+   Help: who to report to
+   ========================================================================== */
+
+.report {
+  padding: clamp(90px, 12vw, 160px) 0;
+}
+.report-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border-top: 1px solid var(--line-strong);
+}
+.report-row {
+  position: relative;
+  display: grid;
+  grid-template-columns: 11rem minmax(0, 1.3fr) minmax(0, 1fr) 2.6rem;
+  align-items: center;
+  gap: 20px;
+  padding: 30px 0;
+  border-bottom: 1px solid var(--line);
+  isolation: isolate;
+  overflow: hidden;
+  transition: color 0.45s var(--ease), padding 0.55s var(--ease);
+}
+a.report-row::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background: var(--fg);
+  transform: scaleY(0);
+  transform-origin: 50% 100%;
+  transition: transform 0.55s var(--ease);
+}
+a.report-row:hover,
+a.report-row:focus-visible {
+  padding-inline: 26px;
+  color: var(--bg);
+}
+a.report-row:hover::before,
+a.report-row:focus-visible::before {
+  transform: scaleY(1);
+}
+a.report-row:focus-visible {
+  outline-offset: -3px;
+  outline-color: var(--bg);
+}
+.report-region {
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+}
+.report-name {
+  font-family: var(--f-display);
+  font-size: clamp(1.4rem, 2.4vw, 2.1rem);
+  line-height: 1.1;
+  letter-spacing: -0.02em;
+}
+.report-note {
+  color: var(--fg-dim);
+  font-family: var(--f-script);
+  font-size: 13px;
+  letter-spacing: 0.08em;
+  transition: color 0.45s;
+}
+a.report-row:hover .report-note {
+  color: inherit;
+}
+.report-row svg {
+  justify-self: end;
+}
+@media (max-width: 820px) {
+  .report-row {
+    grid-template-columns: minmax(0, 1fr) 2rem;
+    gap: 6px 12px;
+    padding: 24px 0;
+  }
+  .report-row > * {
+    grid-column: 1;
+  }
+  .report-row svg {
+    grid-column: 2;
+    grid-row: 1 / span 3;
+  }
+}
+
+/* ==========================================================================
+   Help: about (numbers count up as the section crosses the screen)
+   ========================================================================== */
+
+@property --nv {
+  syntax: '<integer>';
+  inherits: true;
+  initial-value: 0;
+}
+.about {
+  padding: clamp(90px, 12vw, 160px) 0;
+}
+.about-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr);
+  align-items: end;
+  gap: clamp(32px, 6vw, 100px);
+}
+.about-grid .section-title {
+  margin: 0;
+  font-size: clamp(2.3rem, 5vw, 4.6rem);
+}
+.about-copy p {
+  max-width: 34em;
+  margin: 0 0 20px;
+  color: var(--fg-dim);
+}
+.about-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin-top: clamp(60px, 8vw, 110px);
+  border-top: 1px solid var(--line-strong);
+}
+.about-stats > div {
+  padding: 28px 26px 10px;
+  border-right: 1px solid var(--line);
+}
+.about-stats > div:first-child {
+  padding-left: 0;
+}
+.about-stats > div:last-child {
+  border-right: 0;
+}
+.about-stats > div > span {
+  display: block;
+  max-width: 14em;
+  color: var(--fg-dim);
+  font-size: 15px;
+}
+.num {
+  display: block;
+  margin-bottom: 12px;
+  font-family: var(--f-display);
+  font-size: clamp(4.5rem, 11vw, 10rem);
+  font-weight: 500;
+  line-height: 1;
+  letter-spacing: -0.04em;
+  font-variant-numeric: tabular-nums;
+}
+.num span::before {
+  content: counter(nn);
+  counter-reset: nn var(--nv);
+}
+.num em {
+  margin-left: 0.04em;
+  font-size: 0.4em;
+  font-style: italic;
+  letter-spacing: 0;
+}
+.num--3 {
+  --nv: calc(var(--c) * 3);
+}
+.num--90 {
+  --nv: calc(var(--c) * 90);
+}
+.num--0 {
+  --nv: calc(var(--c) * 0);
+}
+@media (max-width: 860px) {
+  .about-grid {
+    grid-template-columns: 1fr;
+  }
+  .about-stats {
+    grid-template-columns: 1fr;
+  }
+  .about-stats > div {
+    padding: 24px 0;
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+}

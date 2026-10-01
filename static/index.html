@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#0a0d14">
+    <meta name="description" content="EchoFlow voice turn-taking and interruption demo">
+    <title>EchoFlow · Voice turn-taking demo</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="app-container">
+        <header class="header">
+            <div class="logo-group">
+                <div class="pulse-indicator" aria-hidden="true"></div>
+                <div class="title-wrap">
+                    <h1>EchoFlow <span class="badge-accent">Voice Lab</span></h1>
+                    <p class="subtitle">A browser and FastAPI demo for voice turn-taking</p>
+                </div>
+            </div>
+            <div class="header-controls">
+                <div class="mode-toggle-group" role="group" aria-label="Conversation mode">
+                    <span class="mode-label">Mode</span>
+                    <button id="btnModeCloud" class="btn-mode active" type="button" onclick="switchMode('cloud')">Cloud</button>
+                    <button id="btnModeLocal" class="btn-mode" type="button" onclick="switchMode('local')">Local</button>
+                </div>
+                <div class="status-chip" id="wsStatus" role="status" aria-live="polite">
+                    <span class="dot" aria-hidden="true"></span>
+                    <span id="wsStatusText">Connecting…</span>
+                </div>
+            </div>
+        </header>
+
+        <main class="dashboard-grid">
+            <section class="panel visualizer-panel" aria-labelledby="audioHeading">
+                <div class="panel-header">
+                    <h2 id="audioHeading">Audio activity</h2>
+                    <span class="chip-tech">16 kHz mono · 30 ms frames</span>
+                </div>
+
+                <div class="visualizer-container">
+                    <div class="canvas-card">
+                        <div class="canvas-meta">
+                            <span class="channel-title user-channel">Microphone input spectrum</span>
+                            <span class="vad-badge" id="userVadBadge">VAD: SILENT</span>
+                        </div>
+                        <canvas id="userCanvas" height="90" aria-label="Microphone frequency activity"></canvas>
+                    </div>
+                    <div class="canvas-card">
+                        <div class="canvas-meta">
+                            <span class="channel-title assistant-channel">Assistant playback spectrum</span>
+                            <span class="duck-badge" id="duckBadge">GAIN: 100%</span>
+                        </div>
+                        <canvas id="assistantCanvas" height="90" aria-label="Assistant frequency activity"></canvas>
+                    </div>
+                </div>
+
+                <div class="hud-metrics-grid" aria-label="Current voice session metrics">
+                    <div class="metric-card">
+                        <span class="metric-label">Intent decision</span>
+                        <div class="metric-val"><span id="valTti">—</span> <small>ms</small></div>
+                        <span class="metric-sub">Server classifier time</span>
+                    </div>
+                    <div class="metric-card">
+                        <span class="metric-label">Turn state</span>
+                        <div class="metric-val state-val" id="metricState">IDLE</div>
+                        <span class="metric-sub" id="metricIntentSub">Ready</span>
+                    </div>
+                    <div class="metric-card">
+                        <span class="metric-label">Echo cancellation</span>
+                        <div class="metric-val state-val">Requested</div>
+                        <span class="metric-sub">Browser microphone constraint</span>
+                    </div>
+                    <div class="metric-card">
+                        <span class="metric-label">Interrupt history</span>
+                        <div class="metric-val state-val">Estimated</div>
+                        <span class="metric-sub">Based on playback duration</span>
+                    </div>
+                </div>
+
+                <div class="judge-testbench">
+                    <h3>Try a demo event</h3>
+                    <p class="testbench-desc">These buttons send fixed demonstration events; they are not measured noise or speech tests.</p>
+                    <div class="btn-group-bench">
+                        <button class="btn-bench btn-hard" type="button" onclick="simulateEvent('HARD_INTERRUPT')">Interrupt demo</button>
+                        <button class="btn-bench btn-backchannel" type="button" onclick="simulateEvent('BACKCHANNEL')">Backchannel demo</button>
+                        <button class="btn-bench btn-noise" type="button" onclick="simulateEvent('NOISE')">Noise event demo</button>
+                    </div>
+                </div>
+            </section>
+
+            <section class="panel conversation-panel" aria-labelledby="conversationHeading">
+                <div class="panel-header">
+                    <h2 id="conversationHeading">Conversation</h2>
+                    <button class="btn-clear" type="button" onclick="clearConversation()" title="Clear only the messages shown in this browser">Clear view</button>
+                </div>
+                <div class="conversation-box" id="conversationBox" role="log" aria-live="polite" aria-relevant="additions text">
+                    <div class="message system-msg">
+                        <div class="msg-bubble">Choose a mode, then send a text prompt or start the microphone.</div>
+                    </div>
+                </div>
+                <div class="voice-bar">
+                    <button id="btnMicToggle" class="btn-mic" type="button" onclick="toggleMicrophone()">
+                        <span aria-hidden="true">🎙️</span><span id="micBtnText">Start Live Voice</span>
+                    </button>
+                    <div class="text-input-wrap">
+                        <input type="text" id="customInput" maxlength="2000" placeholder="Type a message…" aria-label="Message to EchoFlow" onkeydown="handleKey(event)">
+                        <button class="btn-send" type="button" onclick="sendCustomText()">Send</button>
+                    </div>
+                </div>
+                <p class="privacy-note">Microphone audio feeds local VAD. Browser transcription may use a network service in either mode. Cloud mode sends conversation and reply text to the selected providers.</p>
+            </section>
+        </main>
+    </div>
+    <script src="app.js" defer></script>
+</body>
+</html>

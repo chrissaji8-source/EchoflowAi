@@ -12,6 +12,52 @@ import type {
 
 const MAX_MESSAGE_CHARS = 2000
 
+const AUDIO_WORKLET_CODE = `
+class EchoFlowPcmCapture extends AudioWorkletProcessor {
+  constructor() {
+    super()
+    this.targetRate = 16000
+    this.frameSize = 480
+    this.frame = new Float32Array(this.frameSize)
+    this.frameOffset = 0
+    this.sourcePosition = 0
+  }
+
+  process(inputs, outputs) {
+    const input = inputs[0]
+    const output = outputs[0]
+    if (output) for (const channel of output) channel.fill(0)
+    if (!input?.length || !input[0]?.length) return true
+
+    const sampleCount = input[0].length
+    const ratio = sampleRate / this.targetRate
+    while (this.sourcePosition < sampleCount) {
+      const index = Math.floor(this.sourcePosition)
+      const nextIndex = Math.min(index + 1, sampleCount - 1)
+      const mix = this.sourcePosition - index
+      let sample = 0
+      for (const channel of input) sample += channel[index] + (channel[nextIndex] - channel[index]) * mix
+      this.frame[this.frameOffset] = sample / input.length
+      this.frameOffset += 1
+      this.sourcePosition += ratio
+
+      if (this.frameOffset === this.frameSize) {
+        const pcm = new Int16Array(this.frameSize)
+        for (let i = 0; i < this.frameSize; i += 1) {
+          const clipped = Math.max(-1, Math.min(1, this.frame[i]))
+          pcm[i] = clipped < 0 ? clipped * 32768 : clipped * 32767
+        }
+        this.port.postMessage(pcm.buffer, [pcm.buffer])
+        this.frameOffset = 0
+      }
+    }
+    this.sourcePosition -= sampleCount
+    return true
+  }
+}
+registerProcessor('echoflow-pcm-capture', EchoFlowPcmCapture)
+`
+
 function getMicError(error: unknown): VoiceError {
   const name = error instanceof Error ? error.name : ''
   const message = error instanceof Error ? error.message : ''
@@ -246,51 +292,55 @@ export function EchoFlowVoiceProvider({ children }: { children: ReactNode }) {
   const startSpeechRecognition = useCallback((locale: string) => {
     const SpeechRec = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
     if (!SpeechRec || mutedRef.current || !sessionActiveRef.current) return
-    const recognition = new SpeechRec()
-    recognition.continuous = true
-    recognition.interimResults = false
-    recognition.lang = locale
-    recognitionRef.current = recognition
-    recognition.onstart = () => {
-      recognitionRunningRef.current = true
-    }
-    recognition.onresult = (event: any) => {
-      for (let index = event.resultIndex; index < event.results.length; index += 1) {
-        const result = event.results[index]
-        if (!result.isFinal) continue
-        let text = String(result[0]?.transcript ?? '').trim()
-        if (text) {
-          // Phonetic normalization for common browser STT distortions
-          text = text
-            .replace(/\b(for low air|flow air|slow ar|slow air|echo floor|echo blow|a flow ai|eco flow)\b/gi, 'EchoFlow AI')
-            .replace(/\b(echo flow)\b/gi, 'EchoFlow')
-          sendControl({ type: 'USER_TRANSCRIPT_FINAL', text })
+    const isIOS = typeof navigator !== 'undefined' && (/iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1))
+
+    try {
+      const recognition = new SpeechRec()
+      // Safari on iOS throws an error if continuous is true; desktop/Android support true
+      recognition.continuous = !isIOS
+      recognition.interimResults = false
+      recognition.lang = locale || 'en-US'
+      recognitionRef.current = recognition
+
+      recognition.onstart = () => {
+        recognitionRunningRef.current = true
+      }
+      recognition.onresult = (event: any) => {
+        for (let index = event.resultIndex; index < event.results.length; index += 1) {
+          const result = event.results[index]
+          if (!result.isFinal) continue
+          let text = String(result[0]?.transcript ?? '').trim()
+          if (text) {
+            // Phonetic normalization for common browser STT distortions
+            text = text
+              .replace(/\b(for low air|flow air|slow ar|slow air|echo floor|echo blow|a flow ai|eco flow)\b/gi, 'EchoFlow AI')
+              .replace(/\b(echo flow)\b/gi, 'EchoFlow')
+            sendControl({ type: 'USER_TRANSCRIPT_FINAL', text })
+          }
         }
       }
-    }
-    recognition.onerror = (event: any) => {
-      if (event.error !== 'no-speech' && event.error !== 'aborted') {
-        console.info('Browser speech recognition:', event.error)
+      recognition.onerror = (event: any) => {
+        if (event.error !== 'no-speech' && event.error !== 'aborted') {
+          console.info('Browser speech recognition notice:', event.error)
+        }
       }
-    }
-    recognition.onend = () => {
-      recognitionRunningRef.current = false
-      if (recognitionRef.current === recognition && sessionActiveRef.current && !mutedRef.current) {
-        window.setTimeout(() => {
-          if (recognitionRef.current !== recognition || !sessionActiveRef.current || mutedRef.current) return
-          try {
-            recognition.start()
-          } catch {
-            // Some browsers restart recognition themselves; a later onend retries.
-          }
-        }, 250)
+      recognition.onend = () => {
+        recognitionRunningRef.current = false
+        if (recognitionRef.current === recognition && sessionActiveRef.current && !mutedRef.current) {
+          window.setTimeout(() => {
+            if (recognitionRef.current !== recognition || !sessionActiveRef.current || mutedRef.current) return
+            try {
+              recognition.start()
+            } catch {
+              // Ignore if browser already auto-restarted
+            }
+          }, isIOS ? 150 : 250)
+        }
       }
-    }
-    try {
       recognition.start()
-    } catch {
+    } catch (e) {
+      console.warn('Speech recognition start failed:', e)
       recognitionRef.current = null
-      console.info('Browser speech recognition could not start; typed messages remain available.')
     }
   }, [sendControl])
 
@@ -492,6 +542,21 @@ export function EchoFlowVoiceProvider({ children }: { children: ReactNode }) {
     setMicPermission('unknown')
     setPhase(textOnly ? 'connecting' : 'requesting-mic')
 
+    // Create and resume AudioContext immediately on user tap/click to preserve activation on iOS & Android
+    const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext
+    let context: AudioContext | null = null
+    if (AudioContextClass) {
+      try {
+        context = new AudioContextClass()
+        audioCtxRef.current = context
+        if (context.state === 'suspended') {
+          void context.resume()
+        }
+      } catch (cause) {
+        console.warn('AudioContext initial creation warning:', cause)
+      }
+    }
+
     try {
       let stream: MediaStream | null = null
       if (!textOnly) {
@@ -504,7 +569,12 @@ export function EchoFlowVoiceProvider({ children }: { children: ReactNode }) {
           return
         }
         stream = await navigator.mediaDevices.getUserMedia({
-          audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 },
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+            channelCount: 1,
+          },
         })
         if (!sessionActiveRef.current) {
           stream.getTracks().forEach((track) => track.stop())
@@ -514,23 +584,33 @@ export function EchoFlowVoiceProvider({ children }: { children: ReactNode }) {
         setMicPermission('granted')
       }
 
-      let context: AudioContext | null = null
-      try {
-        context = new AudioContext()
-        audioCtxRef.current = context
-        if (context.state === 'suspended') await context.resume()
-      } catch (cause) {
-        if (!textOnly) throw cause
-        console.info('Audio playback is unavailable; continuing with text replies.')
+      if (!context) {
+        try {
+          context = new (window.AudioContext || (window as any).webkitAudioContext)()
+          audioCtxRef.current = context
+        } catch (cause) {
+          if (!textOnly) throw cause
+        }
+      }
+      if (context && context.state === 'suspended') {
+        await context.resume()
       }
 
-      if (!textOnly) {
-        if (!context || !stream) throw new Error('AudioContext is not available in this browser.')
-        if (!context.audioWorklet) throw new Error('AudioWorklet is not supported in this browser.')
-        await context.audioWorklet.addModule('/audio-worklet.js')
-        if (!sessionActiveRef.current) {
-          releaseMedia()
-          return
+      if (!textOnly && context && stream) {
+        // Load AudioWorklet safely via in-memory Blob URL with fallback
+        if (context.audioWorklet) {
+          try {
+            const blob = new Blob([AUDIO_WORKLET_CODE], { type: 'application/javascript' })
+            const blobUrl = URL.createObjectURL(blob)
+            await context.audioWorklet.addModule(blobUrl)
+            URL.revokeObjectURL(blobUrl)
+          } catch {
+            try {
+              await context.audioWorklet.addModule('/audio-worklet.js')
+            } catch (err) {
+              console.warn('AudioWorklet module fallback:', err)
+            }
+          }
         }
 
         const micSource = context.createMediaStreamSource(stream)
@@ -540,23 +620,29 @@ export function EchoFlowVoiceProvider({ children }: { children: ReactNode }) {
         micSourceRef.current = micSource
         micAnalyserRef.current = micAnalyser
 
-        const captureNode = new AudioWorkletNode(context, 'echoflow-pcm-capture', {
-          numberOfInputs: 1,
-          numberOfOutputs: 1,
-          outputChannelCount: [1],
-          channelCount: 1,
-        })
-        const captureMute = context.createGain()
-        captureMute.gain.value = 0
-        captureNode.port.onmessage = (event: MessageEvent<ArrayBuffer>) => {
-          const ws = wsRef.current
-          if (ws?.readyState === WebSocket.OPEN && ws.bufferedAmount < 64 * 1024) ws.send(event.data)
+        if (context.audioWorklet) {
+          try {
+            const captureNode = new AudioWorkletNode(context, 'echoflow-pcm-capture', {
+              numberOfInputs: 1,
+              numberOfOutputs: 1,
+              outputChannelCount: [1],
+              channelCount: 1,
+            })
+            const captureMute = context.createGain()
+            captureMute.gain.value = 0
+            captureNode.port.onmessage = (event: MessageEvent<ArrayBuffer>) => {
+              const ws = wsRef.current
+              if (ws?.readyState === WebSocket.OPEN && ws.bufferedAmount < 64 * 1024) ws.send(event.data)
+            }
+            micAnalyser.connect(captureNode)
+            captureNode.connect(captureMute)
+            captureMute.connect(context.destination)
+            captureNodeRef.current = captureNode
+            captureMuteRef.current = captureMute
+          } catch (workletError) {
+            console.info('Worklet capture node fallback notice:', workletError)
+          }
         }
-        micAnalyser.connect(captureNode)
-        captureNode.connect(captureMute)
-        captureMute.connect(context.destination)
-        captureNodeRef.current = captureNode
-        captureMuteRef.current = captureMute
       }
 
       if (context) {

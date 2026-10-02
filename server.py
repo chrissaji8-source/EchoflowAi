@@ -5,6 +5,7 @@ import base64
 import io
 import json
 import logging
+import os
 import secrets
 import wave
 from contextlib import asynccontextmanager
@@ -136,6 +137,7 @@ async def websocket_audio_endpoint(websocket: WebSocket) -> None:
     consecutive_silence_frames = 0
     voiced_speech_frames_count = 0
     stt_task: Optional[asyncio.Task] = None
+    stt_generation_id = 0
 
     generation_task: Optional[asyncio.Task] = None
     cancel_event: Optional[asyncio.Event] = None
@@ -149,6 +151,16 @@ async def websocket_audio_endpoint(websocket: WebSocket) -> None:
     async def send_json(payload: Dict[str, Any]) -> None:
         async with send_lock:
             await websocket.send_json(payload)
+
+    async def cancel_stt_task() -> None:
+        nonlocal stt_task
+        if stt_task is not None and not stt_task.done():
+            stt_task.cancel()
+            try:
+                await stt_task
+            except (asyncio.CancelledError, Exception):
+                pass
+        stt_task = None
 
     def cancel_generation() -> None:
         nonlocal generation_task, cancel_event, active_turn_id
@@ -487,29 +499,41 @@ async def websocket_audio_endpoint(websocket: WebSocket) -> None:
                                 overall_rms = AudioDSP.calculate_rms(float_arr)
                                 # Must meet minimal physical audio loudness (rejects quiet ambient background line hiss)
                                 if overall_rms >= 0.012:
-                                    async def process_server_stt(frames: list[bytes]) -> None:
-                                        wav_bytes = pcm_to_wav(frames, config.SAMPLE_RATE)
-                                        transcribed_text = await cloud_pipeline.transcribe_audio(wav_bytes)
-                                        if transcribed_text and transcribed_text.strip():
-                                            cleaned = transcribed_text.strip()
-                                            if state_manager.is_assistant_speaking:
-                                                classification = intent_classifier.classify_text(cleaned)
-                                                if classification["intent"] == IntentType.BACKCHANNEL:
-                                                    await send_json({
-                                                        "type": "BACKCHANNEL_IGNORED",
-                                                        "matched_text": classification["matched_text"],
-                                                        "action": "RESTORE_VOLUME",
-                                                    })
-                                                    return
-                                                await interrupt_and_respond(
-                                                    cleaned,
-                                                    classification["matched_text"],
-                                                    classification["latency_ms"],
-                                                )
-                                            else:
-                                                await start_user_turn(cleaned)
+                                    stt_generation_id += 1
+                                    current_stt_id = stt_generation_id
 
-                                    stt_task = asyncio.create_task(process_server_stt(frames_to_process))
+                                    async def process_server_stt(frames: list[bytes], stt_id: int) -> None:
+                                        try:
+                                            wav_bytes = pcm_to_wav(frames, config.SAMPLE_RATE)
+                                            transcribed_text = await cloud_pipeline.transcribe_audio(wav_bytes)
+                                            if stt_id != stt_generation_id:
+                                                return
+                                            if transcribed_text and transcribed_text.strip():
+                                                cleaned = transcribed_text.strip()
+                                                if state_manager.is_assistant_speaking:
+                                                    classification = intent_classifier.classify_text(cleaned)
+                                                    if classification["intent"] == IntentType.BACKCHANNEL:
+                                                        await send_json({
+                                                            "type": "BACKCHANNEL_IGNORED",
+                                                            "matched_text": classification["matched_text"],
+                                                            "action": "RESTORE_VOLUME",
+                                                        })
+                                                        return
+                                                    await interrupt_and_respond(
+                                                        cleaned,
+                                                        classification["matched_text"],
+                                                        classification["latency_ms"],
+                                                    )
+                                                else:
+                                                    await start_user_turn(cleaned)
+                                        except asyncio.CancelledError:
+                                            raise
+                                        except Exception:
+                                            logger.exception("Server-side STT failed for session %s", session_id)
+
+                                    if stt_task is not None and not stt_task.done():
+                                        stt_task.cancel()
+                                    stt_task = asyncio.create_task(process_server_stt(frames_to_process, stt_generation_id))
 
                     if was_active and not is_speech:
                         await send_json({"type": "VAD_STATE", "active": False, "speech_prob": round(probability, 3)})
@@ -527,6 +551,7 @@ async def websocket_audio_endpoint(websocket: WebSocket) -> None:
                 await task_to_cancel
             except (asyncio.CancelledError, Exception):
                 pass
+        await cancel_stt_task()
         active_sessions.pop(session_id, None)
 
 

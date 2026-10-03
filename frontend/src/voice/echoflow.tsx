@@ -103,6 +103,8 @@ export function EchoFlowVoiceProvider({ children }: { children: ReactNode }) {
   const assistantGainRef = useRef<GainNode | null>(null)
   const recognitionRef = useRef<any>(null)
   const recognitionRunningRef = useRef(false)
+  const serverSttRef = useRef(false)
+  const currentLocaleRef = useRef('en-US')
   const audioQueueRef = useRef<AudioBufferSourceNode[]>([])
   const animFrameRef = useRef<number | null>(null)
   const mutedRef = useRef(false)
@@ -163,7 +165,7 @@ export function EchoFlowVoiceProvider({ children }: { children: ReactNode }) {
     serverTurnIdRef.current = null
   }, [])
 
-  const releaseMedia = useCallback(() => {
+  const stopSpeechRecognition = useCallback(() => {
     const recognition = recognitionRef.current
     recognitionRef.current = null
     recognitionRunningRef.current = false
@@ -176,6 +178,10 @@ export function EchoFlowVoiceProvider({ children }: { children: ReactNode }) {
         // It may not have started yet.
       }
     }
+  }, [])
+
+  const releaseMedia = useCallback(() => {
+    stopSpeechRecognition()
     if (captureNodeRef.current) {
       captureNodeRef.current.port.onmessage = null
       captureNodeRef.current.disconnect()
@@ -201,7 +207,7 @@ export function EchoFlowVoiceProvider({ children }: { children: ReactNode }) {
     animFrameRef.current = null
     levels.current.input = 0
     levels.current.output = 0
-  }, [flushAudioBuffer, levels])
+  }, [flushAudioBuffer, levels, stopSpeechRecognition])
 
   const stopSession = useCallback(() => {
     sessionActiveRef.current = false
@@ -400,8 +406,22 @@ export function EchoFlowVoiceProvider({ children }: { children: ReactNode }) {
             setConnection('online')
             setPhase('listening')
             setStartedAt(Date.now())
+            if (msg.server_stt !== undefined) {
+              serverSttRef.current = Boolean(msg.server_stt)
+            }
             sendControl({ type: 'SET_VOICE', locale: config.locale, voice_id: config.voiceId })
             finish()
+            break
+          case 'MODE_CHANGED':
+            if (msg.server_stt !== undefined) {
+              const serverStt = Boolean(msg.server_stt)
+              serverSttRef.current = serverStt
+              if (serverStt) {
+                stopSpeechRecognition()
+              } else if (!mutedRef.current && sessionActiveRef.current) {
+                startSpeechRecognition(currentLocaleRef.current)
+              }
+            }
             break
           case 'USER_MESSAGE': {
             const userTurn: TranscriptTurn = {
@@ -523,7 +543,7 @@ export function EchoFlowVoiceProvider({ children }: { children: ReactNode }) {
         }
       }
     })
-  }, [ensureAssistantTurn, failSession, flushAudioBuffer, playAudio, sendControl, setAssistantGain, setPhase])
+  }, [ensureAssistantTurn, failSession, flushAudioBuffer, playAudio, sendControl, setAssistantGain, setPhase, startSpeechRecognition, stopSpeechRecognition])
 
   const start = useCallback(async (config: VoiceSessionConfig, initialText?: string) => {
     const textOnly = initialText !== undefined
@@ -631,6 +651,7 @@ export function EchoFlowVoiceProvider({ children }: { children: ReactNode }) {
             const captureMute = context.createGain()
             captureMute.gain.value = 0
             captureNode.port.onmessage = (event: MessageEvent<ArrayBuffer>) => {
+              if (mutedRef.current) return
               const ws = wsRef.current
               if (ws?.readyState === WebSocket.OPEN && ws.bufferedAmount < 64 * 1024) ws.send(event.data)
             }
@@ -656,6 +677,7 @@ export function EchoFlowVoiceProvider({ children }: { children: ReactNode }) {
         assistantAnalyserRef.current = assistantAnalyser
       }
 
+      currentLocaleRef.current = config.locale || 'en-US'
       startLevelMeter()
       setPhase('connecting')
       await connectWebSocket(config)
@@ -663,7 +685,7 @@ export function EchoFlowVoiceProvider({ children }: { children: ReactNode }) {
       if (textOnly) {
         const cleanText = initialText.trim()
         if (cleanText && sendControl({ type: 'USER_TEXT_INPUT', text: cleanText })) setPhase('thinking')
-      } else {
+      } else if (!serverSttRef.current) {
         startSpeechRecognition(config.locale)
       }
     } catch (cause) {
@@ -693,21 +715,12 @@ export function EchoFlowVoiceProvider({ children }: { children: ReactNode }) {
     mutedRef.current = nextMuted
     setMutedState(nextMuted)
     micStreamRef.current?.getAudioTracks().forEach((track) => { track.enabled = !nextMuted })
-    const recognition = recognitionRef.current
-    if (nextMuted && recognition) {
-      try {
-        recognition.stop()
-      } catch {
-        // Recognition can already be stopping.
-      }
-    } else if (!nextMuted && recognition && !recognitionRunningRef.current) {
-      try {
-        recognition.start()
-      } catch {
-        // The browser may still be completing a previous stop.
-      }
+    if (nextMuted) {
+      stopSpeechRecognition()
+    } else if (!serverSttRef.current && sessionActiveRef.current) {
+      startSpeechRecognition(currentLocaleRef.current)
     }
-  }, [])
+  }, [startSpeechRecognition, stopSpeechRecognition])
 
   const interrupt = useCallback(() => {
     if (!sessionActiveRef.current || (phase !== 'speaking' && phase !== 'thinking')) return

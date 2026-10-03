@@ -2,11 +2,13 @@
 
 import asyncio
 import base64
+import difflib
 import io
 import json
 import logging
 import os
 import secrets
+import time
 import wave
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -122,6 +124,36 @@ def pcm_to_wav(pcm_chunks: list[bytes], sample_rate: int = 16000) -> bytes:
     return buf.getvalue()
 
 
+def normalize_for_dedup(text: str) -> str:
+    return "".join(ch.lower() for ch in text if ch.isalnum() or ch.isspace()).strip()
+
+
+def is_duplicate_turn(new_text: str, last_text: str, last_time: float) -> bool:
+    if not last_text or last_time <= 0:
+        return False
+    elapsed = time.monotonic() - last_time
+    if elapsed > 4.5:
+        return False
+
+    norm_new = normalize_for_dedup(new_text)
+    norm_last = normalize_for_dedup(last_text)
+    if not norm_new or not norm_last:
+        return False
+
+    if norm_new == norm_last:
+        return True
+
+    ratio = difflib.SequenceMatcher(None, norm_new, norm_last).ratio()
+    if ratio >= 0.75:
+        return True
+
+    if len(norm_new) >= 15 and len(norm_last) >= 15:
+        if norm_new in norm_last or norm_last in norm_new:
+            return True
+
+    return False
+
+
 @app.websocket("/ws/audio")
 async def websocket_audio_endpoint(websocket: WebSocket) -> None:
     await websocket.accept()
@@ -139,6 +171,19 @@ async def websocket_audio_endpoint(websocket: WebSocket) -> None:
     stt_task: Optional[asyncio.Task] = None
     stt_generation_id = 0
 
+    last_user_text: str = ""
+    last_user_time: float = 0.0
+
+    def is_server_stt_enabled() -> bool:
+        return session_mode == "cloud" and bool(cloud_pipeline.groq_api_key)
+
+    def abort_stt_task() -> None:
+        nonlocal stt_task, stt_generation_id
+        stt_generation_id += 1
+        if stt_task is not None and not stt_task.done():
+            stt_task.cancel()
+        stt_task = None
+
     generation_task: Optional[asyncio.Task] = None
     cancel_event: Optional[asyncio.Event] = None
     active_turn_id: Optional[str] = None
@@ -153,7 +198,8 @@ async def websocket_audio_endpoint(websocket: WebSocket) -> None:
             await websocket.send_json(payload)
 
     async def cancel_stt_task() -> None:
-        nonlocal stt_task
+        nonlocal stt_task, stt_generation_id
+        stt_generation_id += 1
         if stt_task is not None and not stt_task.done():
             stt_task.cancel()
             try:
@@ -176,13 +222,24 @@ async def websocket_audio_endpoint(websocket: WebSocket) -> None:
         return cloud_pipeline if session_mode == "cloud" else local_pipeline
 
     async def start_user_turn(user_text: str) -> None:
-        nonlocal generation_task, cancel_event, active_request_id
+        nonlocal generation_task, cancel_event, active_request_id, last_user_text, last_user_time
         user_text = user_text.strip()
         if not user_text:
             return
         if len(user_text) > config.MAX_TRANSCRIPT_CHARS:
             await send_json({"type": "ERROR", "message": "That message is too long. Please keep it under 2,000 characters."})
             return
+
+        if is_duplicate_turn(user_text, last_user_text, last_user_time):
+            logger.info("Discarded duplicate user turn (%.2fs elapsed): %r", time.monotonic() - last_user_time, user_text)
+            return
+
+        last_user_text = user_text
+        last_user_time = time.monotonic()
+        abort_stt_task()
+        speech_audio_frames.clear()
+        consecutive_silence_frames = 0
+        voiced_speech_frames_count = 0
 
         # A new finalized utterance supersedes any older generation, including one
         # that is still waiting for speech synthesis or browser playback.
@@ -297,6 +354,14 @@ async def websocket_audio_endpoint(websocket: WebSocket) -> None:
         generation_task = asyncio.create_task(generate_response())
 
     async def interrupt_and_respond(user_text: str, matched_text: str, decision_ms: Optional[float]) -> None:
+        user_text = user_text.strip()
+        if not user_text:
+            return
+        if is_duplicate_turn(user_text, last_user_text, last_user_time):
+            logger.info("Ignored duplicate turn during assistant playback (%.2fs elapsed): %r", time.monotonic() - last_user_time, user_text)
+            await send_json({"type": "ACOUSTIC_DUCK_RELEASE", "fade_ms": config.DUCKING_FADE_MS})
+            return
+
         interrupted_turn_id = active_turn_id
         interrupted_request_id = active_request_id
         rollback = state_manager.rollback_on_interrupt()
@@ -318,6 +383,7 @@ async def websocket_audio_endpoint(websocket: WebSocket) -> None:
             "type": "SESSION_INIT",
             "session_id": session_id,
             "mode": session_mode,
+            "server_stt": is_server_stt_enabled(),
             "message": "Connected to EchoFlow.",
         })
 
@@ -350,7 +416,11 @@ async def websocket_audio_endpoint(websocket: WebSocket) -> None:
                     else:
                         session_mode = requested_mode
                         active_sessions[session_id]["mode"] = session_mode
-                        await send_json({"type": "MODE_CHANGED", "mode": session_mode})
+                        await send_json({
+                            "type": "MODE_CHANGED",
+                            "mode": session_mode,
+                            "server_stt": is_server_stt_enabled(),
+                        })
 
                 elif message_type == "SET_VOICE":
                     requested_locale = str(data.get("locale", "en-IN"))
@@ -390,8 +460,23 @@ async def websocket_audio_endpoint(websocket: WebSocket) -> None:
                     user_text = raw_user_text.strip()
                     if not user_text:
                         continue
+
+                    # If server-side STT is actively handling audio, browser speech recognition is redundant.
+                    if message_type == "USER_TRANSCRIPT_FINAL" and is_server_stt_enabled():
+                        logger.info("Ignored browser USER_TRANSCRIPT_FINAL because server STT is active: %r", user_text)
+                        continue
+
+                    abort_stt_task()
                     speech_audio_frames.clear()
                     consecutive_silence_frames = 0
+                    voiced_speech_frames_count = 0
+
+                    if is_duplicate_turn(user_text, last_user_text, last_user_time):
+                        logger.info("Discarded duplicate %s: %r", message_type, user_text)
+                        if state_manager.is_assistant_speaking:
+                            await send_json({"type": "ACOUSTIC_DUCK_RELEASE", "fade_ms": config.DUCKING_FADE_MS})
+                        continue
+
                     if state_manager.is_assistant_speaking:
                         classification = (
                             intent_classifier.classify_text(user_text)
@@ -493,7 +578,7 @@ async def websocket_audio_endpoint(websocket: WebSocket) -> None:
                             voiced_speech_frames_count = 0
 
                             # Ignore if utterance had fewer than 9 voiced frames (less than ~270ms of speech)
-                            if voiced_count >= 9:
+                            if is_server_stt_enabled() and voiced_count >= 9:
                                 raw_pcm = b"".join(frames_to_process)
                                 float_arr = AudioDSP.bytes_to_float32(raw_pcm)
                                 overall_rms = AudioDSP.calculate_rms(float_arr)
@@ -510,6 +595,11 @@ async def websocket_audio_endpoint(websocket: WebSocket) -> None:
                                                 return
                                             if transcribed_text and transcribed_text.strip():
                                                 cleaned = transcribed_text.strip()
+                                                if is_duplicate_turn(cleaned, last_user_text, last_user_time):
+                                                    logger.info("Discarded duplicate server STT: %r", cleaned)
+                                                    if state_manager.is_assistant_speaking:
+                                                        await send_json({"type": "ACOUSTIC_DUCK_RELEASE", "fade_ms": config.DUCKING_FADE_MS})
+                                                    return
                                                 if state_manager.is_assistant_speaking:
                                                     classification = intent_classifier.classify_text(cleaned)
                                                     if classification["intent"] == IntentType.BACKCHANNEL:

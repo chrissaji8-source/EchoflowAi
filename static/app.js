@@ -18,6 +18,7 @@ let currentAudioSource = null;
 let currentAudioTurnId = null;
 let pendingAudioTurnId = null;
 let currentMode = "cloud";
+let serverSttActive = false;
 let drawScheduled = false;
 const assistantMessages = new Map();
 const cancelledAudioTurns = new Set();
@@ -84,10 +85,21 @@ function handleServerMessage(message) {
     switch (message.type) {
         case "SESSION_INIT":
             setModeButtons(message.mode);
+            if (message.server_stt !== undefined) {
+                serverSttActive = Boolean(message.server_stt);
+            }
             break;
         case "MODE_CHANGED":
             currentMode = message.mode;
             setModeButtons(currentMode);
+            if (message.server_stt !== undefined) {
+                serverSttActive = Boolean(message.server_stt);
+                if (serverSttActive && recognition) {
+                    stopSpeechRecognition();
+                } else if (!serverSttActive && isMicActive && !recognition) {
+                    startSpeechRecognition();
+                }
+            }
             addSystemMessage(`Using ${currentMode} mode for this connection.`);
             break;
         case "USER_MESSAGE":
@@ -280,7 +292,9 @@ async function startMicrophone() {
         btnMicToggle.classList.add("active");
         micBtnText.textContent = "Stop Voice";
         userVadBadge.textContent = "MIC ACTIVE";
-        startSpeechRecognition();
+        if (!serverSttActive) {
+            startSpeechRecognition();
+        }
     } catch (error) {
         console.error("Microphone setup failed:", error);
         addSystemMessage(error.message || "Microphone access could not be started.");
@@ -291,7 +305,17 @@ async function startMicrophone() {
     }
 }
 
+function stopSpeechRecognition() {
+    if (recognition) {
+        recognition.onend = null;
+        recognition.onerror = null;
+        try { recognition.stop(); } catch (_) { /* recognition may not have started */ }
+        recognition = null;
+    }
+}
+
 function startSpeechRecognition() {
+    if (serverSttActive) return;
     const SpeechRecognitionClass = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SpeechRecognitionClass) {
         addSystemMessage("Live transcription is not supported here. You can still use the text box; VAD remains active.");
@@ -320,9 +344,9 @@ function startSpeechRecognition() {
         }
     };
     recognition.onend = () => {
-        if (isMicActive && recognition) {
+        if (isMicActive && recognition && !serverSttActive) {
             window.setTimeout(() => {
-                if (!isMicActive || !recognition) return;
+                if (!isMicActive || !recognition || serverSttActive) return;
                 try { recognition.start(); } catch (_) { /* already restarting */ }
             }, 250);
         }
@@ -336,11 +360,7 @@ function startSpeechRecognition() {
 
 function stopMicrophone() {
     isMicActive = false;
-    if (recognition) {
-        recognition.onend = null;
-        try { recognition.stop(); } catch (_) { /* recognition may not have started */ }
-        recognition = null;
-    }
+    stopSpeechRecognition();
     if (captureNode) {
         captureNode.port.onmessage = null;
         captureNode.disconnect();

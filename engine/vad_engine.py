@@ -42,7 +42,7 @@ class VADEngine:
         
         # Adaptive noise floor tracking during silence (clamped to prevent drifting too low)
         if not self.is_speech_active and rms < self.noise_floor_rms * 2.0:
-            self.noise_floor_rms = max(0.010, min(0.050, 0.95 * self.noise_floor_rms + 0.05 * rms))
+            self.noise_floor_rms = max(0.012, min(0.060, 0.95 * self.noise_floor_rms + 0.05 * rms))
             
         # Zero Crossing Rate (ZCR) to differentiate high-frequency hiss/noise from voiced speech
         zero_crossings = np.count_nonzero(np.diff(np.signbit(float_arr))) / max(1, len(float_arr) - 1)
@@ -64,8 +64,12 @@ class VADEngine:
         speech_prob = float(0.5 * voice_ratio + 0.35 * snr_factor + 0.15 * zcr_penalty)
         speech_prob = np.clip(speech_prob, 0.0, 1.0)
         
-        # Absolute minimal RMS floor for voiced speech (rejects low-level room hiss / background fan)
-        if rms < 0.018:
+        # Require audio to be at least 4 dB above the adaptive noise floor
+        if rms < self.noise_floor_rms * 1.6:
+            speech_prob = 0.0
+
+        # Absolute minimal RMS floor for voiced speech (rejects room hiss, fans, and mic preamp noise)
+        if rms < 0.028:
             speech_prob = 0.0
 
         is_speech = speech_prob >= self.threshold

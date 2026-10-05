@@ -31,6 +31,12 @@ WHISPER_SILENCE_PHRASES = {
     "y'all", "uh", "um", "oh", "ah", "okay", "abre, a rede", "abre a rede",
     "a rede", "donati hilton", "donati", "hilton", "so", "testing",
     "one two three", "hello world", "good morning", "watching",
+    "echoflow ai voice assistant", "echo flow ai voice assistant", "echoflow", "echo flow",
+    "to us", "to us.", "is the pre", "is the presentation",
+    "and i'm going to go to the next video", "and i'll get a ticket",
+    "and the microphone algorithm", "i'm not going to do it", "i'm going to call you codex",
+    "yeah, no good laptop", "for the issues", "i am a writer",
+    "and make a good video", "and the voice of the government", "is my name", "be my name",
 }
 
 SINGLE_WORD_SILENCE_ARTIFACTS = {
@@ -265,7 +271,7 @@ class CloudPipeline:
     async def transcribe_audio(
         self,
         wav_bytes: bytes,
-        prompt: str = "EchoFlow AI voice assistant",
+        prompt: str = "",
         language: str = "en",
     ) -> str:
         """Transcribe PCM/WAV speech using ultra-fast Groq Whisper API (<150ms latency)."""
@@ -280,8 +286,9 @@ class CloudPipeline:
             "response_format": "verbose_json",
             "temperature": "0.0",
             "language": iso_lang,
-            "prompt": prompt,
         }
+        if prompt:
+            data["prompt"] = prompt
         try:
             response = await client.post(
                 "https://api.groq.com/openai/v1/audio/transcriptions",
@@ -320,6 +327,15 @@ class CloudPipeline:
                 if len(words) == 1 and words[0] in SINGLE_WORD_SILENCE_ARTIFACTS:
                     logger.debug("Filtered single-word silence artifact: %r", text)
                     return ""
+
+                # Filter single-word greetings ("hello", "hi", "hey") generated from background air
+                if len(words) == 1 and words[0] in {"hello", "hi", "hey"}:
+                    if segments:
+                        max_ns = max(s.get("no_speech_prob", 0.0) for s in segments if "no_speech_prob" in s)
+                        min_lp = min(s.get("avg_logprob", 0.0) for s in segments if "avg_logprob" in s)
+                        if max_ns > 0.05 or min_lp < -0.45:
+                            logger.info("Discarded ambiguous greeting on silence (no_speech=%.2f, logprob=%.2f): %r", max_ns, min_lp, text)
+                            return ""
 
                 # Filter known Whisper silence phrases
                 if t in WHISPER_SILENCE_PHRASES or any(t.startswith(p) and len(words) <= 3 for p in ["thank you", "thanks for", "bye"]):

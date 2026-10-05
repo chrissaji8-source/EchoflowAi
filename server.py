@@ -560,7 +560,7 @@ async def websocket_audio_endpoint(websocket: WebSocket) -> None:
                     if not was_active and state_manager.is_assistant_speaking:
                         frame_float = AudioDSP.bytes_to_float32(pcm_bytes)
                         frame_rms = AudioDSP.calculate_rms(frame_float)
-                        if probability >= 0.80 and frame_rms >= 0.035:
+                        if probability >= 0.80 and frame_rms >= 0.038:
                             await send_json({
                                 "type": "ACOUSTIC_DUCK_TRIGGER",
                                 "speech_prob": round(probability, 3),
@@ -575,8 +575,20 @@ async def websocket_audio_endpoint(websocket: WebSocket) -> None:
                         if consecutive_silence_frames <= 10:
                             speech_audio_frames.append(pcm_bytes)
 
+                        # Drop stale speech buffer if silence occurs after just a few noise ticks (<8 frames / 240ms)
+                        if consecutive_silence_frames >= 8 and voiced_speech_frames_count < 8:
+                            speech_audio_frames.clear()
+                            consecutive_silence_frames = 0
+                            voiced_speech_frames_count = 0
+
+                        # Prevent runaway buffer accumulation: drop buffer if it exceeds 200 frames (~6s) while inactive
+                        elif len(speech_audio_frames) > 200 and not vad.is_speech_active:
+                            speech_audio_frames.clear()
+                            consecutive_silence_frames = 0
+                            voiced_speech_frames_count = 0
+
                         # Once silence lasts ~14 frames (~420ms) after genuine voiced speech:
-                        if consecutive_silence_frames >= 14:
+                        elif consecutive_silence_frames >= 14:
                             frames_to_process = speech_audio_frames[:]
                             voiced_count = voiced_speech_frames_count
                             speech_audio_frames.clear()
@@ -585,16 +597,21 @@ async def websocket_audio_endpoint(websocket: WebSocket) -> None:
 
                             # Dynamic thresholding:
                             # When assistant is speaking, speaker echo bleeds into the mic.
-                            # Require longer sustained speech (18 frames / 540ms) and higher RMS (0.038).
-                            # In normal conversational state, require at least 14 frames (420ms) and RMS >= 0.022.
+                            # Require longer sustained speech (18 frames / 540ms) and higher RMS (0.040).
+                            # In normal conversational state, require at least 14 frames (420ms) and RMS >= 0.028.
                             min_voiced = 18 if state_manager.is_assistant_speaking else 14
-                            min_rms = 0.038 if state_manager.is_assistant_speaking else 0.022
+                            min_rms = 0.040 if state_manager.is_assistant_speaking else 0.028
+                            total_frames = len(frames_to_process)
+                            speech_density = (voiced_count / total_frames) if total_frames > 0 else 0.0
 
-                            if is_server_stt_enabled() and voiced_count >= min_voiced:
+                            if is_server_stt_enabled() and voiced_count >= min_voiced and speech_density >= 0.35:
                                 raw_pcm = b"".join(frames_to_process)
                                 float_arr = AudioDSP.bytes_to_float32(raw_pcm)
                                 overall_rms = AudioDSP.calculate_rms(float_arr)
-                                if overall_rms >= min_rms:
+                                peak_amp = float(np.max(np.abs(float_arr))) if len(float_arr) > 0 else 0.0
+
+                                # Require minimum overall RMS and peak amplitude corresponding to real human vocal syllables
+                                if overall_rms >= min_rms and peak_amp >= 0.080:
                                     stt_generation_id += 1
                                     current_stt_id = stt_generation_id
 

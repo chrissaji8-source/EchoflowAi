@@ -597,22 +597,22 @@ async def websocket_audio_endpoint(websocket: WebSocket) -> None:
                             voiced_speech_frames_count = 0
 
                             # Dynamic thresholding:
-                            # When assistant is speaking, speaker echo bleeds into the mic.
-                            # Require longer sustained speech (18 frames / 540ms) and higher RMS (0.040).
-                            # In normal conversational state, require at least 14 frames (420ms) and RMS >= 0.028.
-                            min_voiced = 18 if state_manager.is_assistant_speaking else 14
-                            min_rms = 0.040 if state_manager.is_assistant_speaking else 0.028
+                            # A crisp barge-in interrupt ("Stop!", "Wait!") takes ~10-12 frames (300-360ms).
+                            min_voiced = 10 if state_manager.is_assistant_speaking else 14
+                            min_rms = 0.035 if state_manager.is_assistant_speaking else 0.028
+                            min_density = 0.30 if state_manager.is_assistant_speaking else 0.35
+                            peak_threshold = 0.075 if state_manager.is_assistant_speaking else 0.080
                             total_frames = len(frames_to_process)
                             speech_density = (voiced_count / total_frames) if total_frames > 0 else 0.0
 
-                            if is_server_stt_enabled() and voiced_count >= min_voiced and speech_density >= 0.35:
+                            if is_server_stt_enabled() and voiced_count >= min_voiced and speech_density >= min_density:
                                 raw_pcm = b"".join(frames_to_process)
                                 float_arr = AudioDSP.bytes_to_float32(raw_pcm)
                                 overall_rms = AudioDSP.calculate_rms(float_arr)
                                 peak_amp = float(np.max(np.abs(float_arr))) if len(float_arr) > 0 else 0.0
 
                                 # Require minimum overall RMS and peak amplitude corresponding to real human vocal syllables
-                                if overall_rms >= min_rms and peak_amp >= 0.080:
+                                if overall_rms >= min_rms and peak_amp >= peak_threshold:
                                     stt_generation_id += 1
                                     current_stt_id = stt_generation_id
 

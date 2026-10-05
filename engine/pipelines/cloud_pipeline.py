@@ -96,7 +96,7 @@ class CloudPipeline:
                 "model": config.GROQ_MODEL,
                 "messages": messages,
                 "stream": True,
-                "max_tokens": config.LLM_MAX_OUTPUT_TOKENS,
+                "max_tokens": min(300, config.LLM_MAX_OUTPUT_TOKENS),
                 "temperature": 0.6,
             }
             client = await self._get_client()
@@ -123,9 +123,7 @@ class CloudPipeline:
                                     yielded_content = True
                                     yield delta
                     if finish_reason == "length":
-                        raise PipelineError(
-                            f"The reply reached its {config.LLM_MAX_OUTPUT_TOKENS}-token limit and may be incomplete."
-                        )
+                        logger.info("Reply reached voice token limit; finishing stream naturally.")
                     return
                 except asyncio.CancelledError:
                     raise
@@ -193,9 +191,7 @@ class CloudPipeline:
                                             yielded_content = True
                                             yield part["text"]
                         if finish_reason == "MAX_TOKENS":
-                            raise PipelineError(
-                                f"The reply reached its {config.LLM_MAX_OUTPUT_TOKENS}-token limit and may be incomplete."
-                            )
+                            logger.info("Gemini reply reached token limit; finishing naturally.")
                         if yielded_content:
                             return
                         if model_index + 1 < len(models):
@@ -349,26 +345,40 @@ class CloudPipeline:
 
                 # Inspect segment confidence metrics from verbose_json
                 if segments:
+                    is_duplex_control = bool(
+                        re.search(r"\b(wait|stop|cancel|no|nope|hold on|pause|quiet|shut up|enough|change|instead|listen|wrong|first|second|third)\b", t, re.IGNORECASE)
+                        or t in {"uh huh", "uh-huh", "mhm", "mm-hmm", "yeah", "yep", "ok", "okay", "got it", "sure", "i see", "yes", "understood", "alright"}
+                    )
+
                     avg_logprobs = [s.get("avg_logprob", 0.0) for s in segments if "avg_logprob" in s]
                     no_speech_probs = [s.get("no_speech_prob", 0.0) for s in segments if "no_speech_prob" in s]
                     compression_ratios = [s.get("compression_ratio", 1.0) for s in segments if "compression_ratio" in s]
 
-                    if avg_logprobs and (min(avg_logprobs) < -0.90 or sum(avg_logprobs) / len(avg_logprobs) < -0.80):
-                        logger.info("Discarded low-confidence Whisper hallucination (logprob=%.2f): %r", min(avg_logprobs), text)
-                        return ""
-                    if no_speech_probs and (max(no_speech_probs) > 0.50 or sum(no_speech_probs) / len(no_speech_probs) > 0.40):
-                        logger.info("Discarded Whisper silence hallucination (no_speech_prob=%.2f): %r", max(no_speech_probs), text)
-                        return ""
-                    if compression_ratios and max(compression_ratios) > 2.2:
-                        logger.info("Discarded repetitive Whisper loop (compression_ratio=%.2f): %r", max(compression_ratios), text)
-                        return ""
-                    if len(words) <= 2:
-                        if avg_logprobs and min(avg_logprobs) < -0.70:
-                            logger.info("Discarded ambiguous short utterance (logprob=%.2f): %r", min(avg_logprobs), text)
+                    if is_duplex_control:
+                        # Allow barge-in commands through even with lower logprob caused by overlapping assistant speech
+                        if avg_logprobs and min(avg_logprobs) < -1.25:
+                            logger.info("Discarded ultra-low confidence control command (logprob=%.2f): %r", min(avg_logprobs), text)
                             return ""
-                        if no_speech_probs and max(no_speech_probs) > 0.25:
-                            logger.info("Discarded ambiguous short utterance (no_speech_prob=%.2f): %r", max(no_speech_probs), text)
+                        if no_speech_probs and max(no_speech_probs) > 0.65:
+                            logger.info("Discarded control command on pure silence (no_speech_prob=%.2f): %r", max(no_speech_probs), text)
                             return ""
+                    else:
+                        if avg_logprobs and (min(avg_logprobs) < -0.90 or sum(avg_logprobs) / len(avg_logprobs) < -0.80):
+                            logger.info("Discarded low-confidence Whisper hallucination (logprob=%.2f): %r", min(avg_logprobs), text)
+                            return ""
+                        if no_speech_probs and (max(no_speech_probs) > 0.50 or sum(no_speech_probs) / len(no_speech_probs) > 0.40):
+                            logger.info("Discarded Whisper silence hallucination (no_speech_prob=%.2f): %r", max(no_speech_probs), text)
+                            return ""
+                        if compression_ratios and max(compression_ratios) > 2.2:
+                            logger.info("Discarded repetitive Whisper loop (compression_ratio=%.2f): %r", max(compression_ratios), text)
+                            return ""
+                        if len(words) <= 2:
+                            if avg_logprobs and min(avg_logprobs) < -0.70:
+                                logger.info("Discarded ambiguous short utterance (logprob=%.2f): %r", min(avg_logprobs), text)
+                                return ""
+                            if no_speech_probs and max(no_speech_probs) > 0.25:
+                                logger.info("Discarded ambiguous short utterance (no_speech_prob=%.2f): %r", max(no_speech_probs), text)
+                                return ""
 
                 logger.info("Groq Whisper transcribed: %r", text)
                 return text

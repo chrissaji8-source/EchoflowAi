@@ -53,7 +53,8 @@ def run_diagnostics() -> None:
     time_axis = np.arange(sample_rate * 30 // 1000, dtype=np.float32) / sample_rate
     pcm = (np.sin(2 * np.pi * 440 * time_axis) * 12000).astype(np.int16).tobytes()
     vad = VADEngine(sample_rate=sample_rate)
-    vad.process_frame(pcm)  # The heuristic requires consecutive frames to confirm onset.
+    for _ in range(3):
+        vad.process_frame(pcm)  # The heuristic requires 4 consecutive frames (120ms) to confirm onset.
     speech, score, vad_ms = vad.process_frame(pcm)
     AudioDSP.apply_gain_ducking(pcm, gain_ratio=0.15)  # Warm up NumPy before timing.
     dsp_started = time.perf_counter()

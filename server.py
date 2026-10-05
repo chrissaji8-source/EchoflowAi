@@ -554,15 +554,21 @@ async def websocket_audio_endpoint(websocket: WebSocket) -> None:
                     consecutive_silence_frames = 0
                     if not was_active:
                         await send_json({"type": "VAD_STATE", "active": True, "speech_prob": round(probability, 3)})
+                    
+                    # Prevent speaker acoustic echo from falsely ducking playback volume:
+                    # require high confidence (>=0.80) and frame energy >= 0.035 RMS.
                     if not was_active and state_manager.is_assistant_speaking:
-                        await send_json({
-                            "type": "ACOUSTIC_DUCK_TRIGGER",
-                            "speech_prob": round(probability, 3),
-                            "latency_ms": round(latency_ms, 3),
-                            "action": "DUCK_VOLUME",
-                            "duck_ratio": config.DUCKING_VOLUME_RATIO,
-                            "fade_ms": config.DUCKING_FADE_MS,
-                        })
+                        frame_float = AudioDSP.bytes_to_float32(pcm_bytes)
+                        frame_rms = AudioDSP.calculate_rms(frame_float)
+                        if probability >= 0.80 and frame_rms >= 0.035:
+                            await send_json({
+                                "type": "ACOUSTIC_DUCK_TRIGGER",
+                                "speech_prob": round(probability, 3),
+                                "latency_ms": round(latency_ms, 3),
+                                "action": "DUCK_VOLUME",
+                                "duck_ratio": config.DUCKING_VOLUME_RATIO,
+                                "fade_ms": config.DUCKING_FADE_MS,
+                            })
                 else:
                     if speech_audio_frames:
                         consecutive_silence_frames += 1
@@ -577,20 +583,26 @@ async def websocket_audio_endpoint(websocket: WebSocket) -> None:
                             consecutive_silence_frames = 0
                             voiced_speech_frames_count = 0
 
-                            # Ignore if utterance had fewer than 9 voiced frames (less than ~270ms of speech)
-                            if is_server_stt_enabled() and voiced_count >= 9:
+                            # Dynamic thresholding:
+                            # When assistant is speaking, speaker echo bleeds into the mic.
+                            # Require longer sustained speech (18 frames / 540ms) and higher RMS (0.038).
+                            # In normal conversational state, require at least 14 frames (420ms) and RMS >= 0.022.
+                            min_voiced = 18 if state_manager.is_assistant_speaking else 14
+                            min_rms = 0.038 if state_manager.is_assistant_speaking else 0.022
+
+                            if is_server_stt_enabled() and voiced_count >= min_voiced:
                                 raw_pcm = b"".join(frames_to_process)
                                 float_arr = AudioDSP.bytes_to_float32(raw_pcm)
                                 overall_rms = AudioDSP.calculate_rms(float_arr)
-                                # Must meet minimal physical audio loudness (rejects quiet ambient background line hiss)
-                                if overall_rms >= 0.012:
+                                if overall_rms >= min_rms:
                                     stt_generation_id += 1
                                     current_stt_id = stt_generation_id
 
                                     async def process_server_stt(frames: list[bytes], stt_id: int) -> None:
                                         try:
                                             wav_bytes = pcm_to_wav(frames, config.SAMPLE_RATE)
-                                            transcribed_text = await cloud_pipeline.transcribe_audio(wav_bytes)
+                                            iso_lang = session_locale.split("-")[0].lower() if session_locale else "en"
+                                            transcribed_text = await cloud_pipeline.transcribe_audio(wav_bytes, language=iso_lang)
                                             if stt_id != stt_generation_id:
                                                 return
                                             if transcribed_text and transcribed_text.strip():

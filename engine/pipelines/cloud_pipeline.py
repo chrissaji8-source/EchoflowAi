@@ -3,6 +3,7 @@
 import asyncio
 import json
 import logging
+import re
 from typing import AsyncGenerator, Dict, List
 
 import edge_tts
@@ -14,6 +15,28 @@ from engine.pipelines.errors import PipelineError
 
 RETRYABLE_STATUS_CODES = {408, 429, 500, 502, 503, 504}
 logger = logging.getLogger("echoflow")
+
+# Non-Latin script detection to catch Whisper language-hallucination leakage when English is expected
+NON_LATIN_SCRIPT_PATTERN = re.compile(
+    r"[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\u0900-\u0D7F\u0E00-\u0E7F\u4E00-\u9FFF\u3040-\u30FF\uAC00-\uD7AF\u0400-\u04FF]"
+)
+
+# Known Whisper hallucinations on mic background hiss, silence, or acoustic room noise
+WHISPER_SILENCE_PHRASES = {
+    "thank you", "thanks", "thank you for watching", "thanks for watching",
+    "thank you very much", "thank you so much", "bye", "goodbye",
+    "you", "subscribe", "like and subscribe", "subtitles", "silence",
+    "mbc 뉴스", "시청해 주셔서 감사합니다", "subtitles by", "translated by",
+    "captioned by", "amara.org", "transcription by", "the end", "peace",
+    "y'all", "uh", "um", "oh", "ah", "okay", "abre, a rede", "abre a rede",
+    "a rede", "donati hilton", "donati", "hilton", "so", "testing",
+    "one two three", "hello world", "good morning", "watching",
+}
+
+SINGLE_WORD_SILENCE_ARTIFACTS = {
+    "you", "so", "oh", "ah", "um", "uh", "reid", "rede", "hilton", "donati",
+    "subtitles", "silence", "bye", "okay", "thanks"
+}
 
 
 def _retry_delay(attempt: int, retry_after: str = "") -> float:
@@ -239,17 +262,24 @@ class CloudPipeline:
         if audio_parts and not cancel_event.is_set():
             yield b"".join(audio_parts)
 
-    async def transcribe_audio(self, wav_bytes: bytes, prompt: str = "EchoFlow AI voice assistant") -> str:
+    async def transcribe_audio(
+        self,
+        wav_bytes: bytes,
+        prompt: str = "EchoFlow AI voice assistant",
+        language: str = "en",
+    ) -> str:
         """Transcribe PCM/WAV speech using ultra-fast Groq Whisper API (<150ms latency)."""
         if not self.groq_api_key or not wav_bytes:
             return ""
         client = await self._get_client()
         headers = {"Authorization": f"Bearer {self.groq_api_key}"}
         files = {"file": ("audio.wav", wav_bytes, "audio/wav")}
+        iso_lang = language.split("-")[0].lower() if language else "en"
         data = {
             "model": "whisper-large-v3-turbo",
-            "response_format": "json",
+            "response_format": "verbose_json",
             "temperature": "0.0",
+            "language": iso_lang,
             "prompt": prompt,
         }
         try:
@@ -263,27 +293,67 @@ class CloudPipeline:
             if response.status_code == 200:
                 result = response.json()
                 text = str(result.get("text", "")).strip()
+                segments = result.get("segments", [])
+                if not text:
+                    return ""
+
                 # Filter out all Whisper hallucinations on background noise/silence
                 t = text.lower().strip().rstrip(".!?,")
-                
+                if len(t) <= 1:
+                    return ""
+
                 # Check for bracketed audio subtitle artifacts (e.g. [Music], (applause))
                 if (t.startswith("[") and t.endswith("]")) or (t.startswith("(") and t.endswith(")")):
                     logger.debug("Filtered Whisper subtitle tag: %r", text)
                     return ""
-                
-                # Phrases that Whisper generates from ambient room hiss / silence
-                silence_phrases = {
-                    "thank you", "thanks", "thank you for watching", "thanks for watching",
-                    "thank you very much", "thank you so much", "bye", "goodbye",
-                    "you", "subscribe", "like and subscribe", "subtitles", "silence",
-                    "mbc 뉴스", "시청해 주셔서 감사합니다", "subtitles by", "translated by",
-                    "the end", "peace", "y'all", "uh", "um", "oh", "ah", "okay",
-                }
-                if t in silence_phrases or any(t.startswith(p) and len(t.split()) <= 3 for p in ["thank you", "thanks for", "bye"]):
+
+                # Reject non-Latin scripts if in English mode (Whisper language hallucination)
+                if iso_lang == "en" and NON_LATIN_SCRIPT_PATTERN.search(text):
+                    logger.info("Filtered non-Latin hallucination in English mode: %r", text)
+                    return ""
+
+                words = re.findall(r"\b\w+\b", t)
+                if not words:
+                    return ""
+
+                # Filter single-word silence artifacts
+                if len(words) == 1 and words[0] in SINGLE_WORD_SILENCE_ARTIFACTS:
+                    logger.debug("Filtered single-word silence artifact: %r", text)
+                    return ""
+
+                # Filter known Whisper silence phrases
+                if t in WHISPER_SILENCE_PHRASES or any(t.startswith(p) and len(words) <= 3 for p in ["thank you", "thanks for", "bye"]):
                     logger.debug("Filtered Whisper silence hallucination: %r", text)
                     return ""
-                if len(t) <= 1:
+
+                # Reject repetitive loop hallucinations (e.g., repeating the same word/phrase)
+                if len(words) >= 4 and len(set(words)) <= len(words) // 2:
+                    logger.info("Filtered repetitive Whisper hallucination: %r", text)
                     return ""
+
+                # Inspect segment confidence metrics from verbose_json
+                if segments:
+                    avg_logprobs = [s.get("avg_logprob", 0.0) for s in segments if "avg_logprob" in s]
+                    no_speech_probs = [s.get("no_speech_prob", 0.0) for s in segments if "no_speech_prob" in s]
+                    compression_ratios = [s.get("compression_ratio", 1.0) for s in segments if "compression_ratio" in s]
+
+                    if avg_logprobs and (min(avg_logprobs) < -0.90 or sum(avg_logprobs) / len(avg_logprobs) < -0.80):
+                        logger.info("Discarded low-confidence Whisper hallucination (logprob=%.2f): %r", min(avg_logprobs), text)
+                        return ""
+                    if no_speech_probs and (max(no_speech_probs) > 0.50 or sum(no_speech_probs) / len(no_speech_probs) > 0.40):
+                        logger.info("Discarded Whisper silence hallucination (no_speech_prob=%.2f): %r", max(no_speech_probs), text)
+                        return ""
+                    if compression_ratios and max(compression_ratios) > 2.2:
+                        logger.info("Discarded repetitive Whisper loop (compression_ratio=%.2f): %r", max(compression_ratios), text)
+                        return ""
+                    if len(words) <= 2:
+                        if avg_logprobs and min(avg_logprobs) < -0.70:
+                            logger.info("Discarded ambiguous short utterance (logprob=%.2f): %r", min(avg_logprobs), text)
+                            return ""
+                        if no_speech_probs and max(no_speech_probs) > 0.25:
+                            logger.info("Discarded ambiguous short utterance (no_speech_prob=%.2f): %r", max(no_speech_probs), text)
+                            return ""
+
                 logger.info("Groq Whisper transcribed: %r", text)
                 return text
             else:

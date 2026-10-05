@@ -296,6 +296,7 @@ export function EchoFlowVoiceProvider({ children }: { children: ReactNode }) {
   }, [sendControl, setAssistantGain])
 
   const startSpeechRecognition = useCallback((locale: string) => {
+    if (serverSttRef.current) return
     const SpeechRec = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
     if (!SpeechRec || mutedRef.current || !sessionActiveRef.current) return
     const isIOS = typeof navigator !== 'undefined' && (/iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1))
@@ -407,7 +408,11 @@ export function EchoFlowVoiceProvider({ children }: { children: ReactNode }) {
             setPhase('listening')
             setStartedAt(Date.now())
             if (msg.server_stt !== undefined) {
-              serverSttRef.current = Boolean(msg.server_stt)
+              const serverStt = Boolean(msg.server_stt)
+              serverSttRef.current = serverStt
+              if (serverStt) {
+                stopSpeechRecognition()
+              }
             }
             sendControl({ type: 'SET_VOICE', locale: config.locale, voice_id: config.voiceId })
             finish()

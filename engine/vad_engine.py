@@ -40,9 +40,9 @@ class VADEngine:
             
         rms = AudioDSP.calculate_rms(float_arr)
         
-        # Adaptive noise floor tracking during silence
+        # Adaptive noise floor tracking during silence (clamped to prevent drifting too low)
         if not self.is_speech_active and rms < self.noise_floor_rms * 2.0:
-            self.noise_floor_rms = 0.95 * self.noise_floor_rms + 0.05 * rms
+            self.noise_floor_rms = max(0.010, min(0.050, 0.95 * self.noise_floor_rms + 0.05 * rms))
             
         # Zero Crossing Rate (ZCR) to differentiate high-frequency hiss/noise from voiced speech
         zero_crossings = np.count_nonzero(np.diff(np.signbit(float_arr))) / max(1, len(float_arr) - 1)
@@ -65,7 +65,7 @@ class VADEngine:
         speech_prob = np.clip(speech_prob, 0.0, 1.0)
         
         # Absolute minimal RMS floor for voiced speech (rejects low-level room hiss / background fan)
-        if rms < 0.008:
+        if rms < 0.018:
             speech_prob = 0.0
 
         is_speech = speech_prob >= self.threshold
@@ -74,12 +74,12 @@ class VADEngine:
         if is_speech:
             self.speech_frame_count += 1
             self.silence_frame_count = 0
-            if self.speech_frame_count >= 2:  # 2 consecutive frames = confirmed onset
+            if self.speech_frame_count >= 4:  # 4 consecutive frames (120ms) = confirmed onset
                 self.is_speech_active = True
         else:
             self.silence_frame_count += 1
             self.speech_frame_count = 0
-            if self.silence_frame_count >= 5: # 5 frames silence = speech ended
+            if self.silence_frame_count >= 6: # 6 frames silence (180ms) = speech ended
                 self.is_speech_active = False
                 
         latency_ms = (time.perf_counter() - t0) * 1000.0

@@ -20,6 +20,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from config import config
+import numpy as np
 from engine.audio_dsp import AudioDSP
 from engine.intent_classifier import IntentClassifier, IntentType
 from engine.pipelines.cloud_pipeline import CloudPipeline
